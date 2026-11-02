@@ -1,0 +1,107 @@
+# Go Schema Registry
+
+Go implementation of the NATS protobuf schema registry.
+
+## Features
+
+- Register a protobuf message type for a NATS subject.
+- Automatically build a `FileDescriptorSet` from a generated protobuf message,
+  including transitive imports.
+- Store schema metadata per NATS subject in a NATS KV bucket.
+- Store `FileDescriptorSet` blobs per `.proto` path in a NATS KV bucket.
+- Look up the schema for a subject at runtime.
+
+## Installation
+
+```bash
+go get github.com/ytakio/nats_proto_schema_registry/go
+```
+
+## Usage
+
+Connect to NATS, create a `Registry`, and push or pull schemas.
+
+### Register a schema
+
+```go
+package main
+
+import (
+    "log"
+
+    "github.com/nats-io/nats.go"
+    schemaregistry "github.com/ytakio/nats_proto_schema_registry/go"
+    "google.golang.org/protobuf/types/known/wrapperspb"
+)
+
+func main() {
+    nc, err := nats.Connect(nats.DefaultURL)
+    if err != nil {
+        log.Fatal(err)
+    }
+    defer nc.Close()
+
+    js, err := nc.JetStream()
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    reg, err := schemaregistry.New(js, "metadata", "schemas")
+    if err != nil {
+        log.Fatal(err)
+    }
+
+    if err := reg.Push("orders.created", wrapperspb.String("order-123")); err != nil {
+        log.Fatal(err)
+    }
+}
+```
+
+### Look up a schema
+
+```go
+fds, meta, err := reg.Pull("orders.created")
+if err != nil {
+    log.Fatal(err)
+}
+
+fmt.Println(meta.Schema.Path)      // google/protobuf/wrappers.proto
+fmt.Println(meta.Schema.FullName)  // google.protobuf.StringValue
+fmt.Println(len(fds.File))         // number of files in descriptor set
+```
+
+## API
+
+The main entry point is the `Registry` interface in `types.go`:
+
+- `Push(subject, msg)` - register a generated protobuf message.
+- `Pull(subject)` - retrieve the `FileDescriptorSet` and `Metadata`.
+
+## Bucket configuration
+
+`New` creates the metadata and schema buckets with default settings if they do
+not exist. If you need fine-grained control over bucket configuration (TTL,
+history, storage type, etc.), create the buckets yourself with
+`js.CreateKeyValue` before calling `New`. `New` uses existing buckets when they
+are already present.
+
+## Development
+
+```bash
+make build       # go build ./...
+make test        # go test ./...
+make test-race   # go test -race ./...
+make vet         # go vet ./...
+make fmt         # go fmt ./...
+make check       # fmt + vet + race tests
+```
+
+## Storage layout
+
+- Metadata bucket (configured by caller):
+  - Key: NATS subject (e.g. `orders.created`)
+  - Value: JSON `{"schema":{"path":"...","full_name":"..."}}`
+- Schema bucket (configured by caller):
+  - Key: `.proto` file path (e.g. `google/protobuf/wrappers.proto`)
+  - Value: serialized `google.protobuf.FileDescriptorSet`
+
