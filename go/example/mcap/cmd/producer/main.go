@@ -48,7 +48,7 @@ func main() {
 
 	// Publish one reading per second for 30 seconds.
 	const total = 30
-	for i := 0; i < total; i++ {
+	for i := range total {
 		now := time.Now()
 		msg := &sensorpb.SensorReading{
 			Sequence:    uint64(i + 1),
