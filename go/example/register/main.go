@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 
@@ -28,8 +29,9 @@ func main() {
 
 	subject := "orders.created"
 	msg := wrapperspb.String("order-123")
+	ctx := context.Background()
 
-	if err := reg.Push(subject, msg); err != nil {
+	if err := reg.Push(ctx, subject, msg); err != nil {
 		log.Fatalf("push: %v", err)
 	}
 

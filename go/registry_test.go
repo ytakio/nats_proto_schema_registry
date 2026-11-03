@@ -1,11 +1,14 @@
 package schemaregistry
 
 import (
+	"context"
 	"errors"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
 )
@@ -13,16 +16,17 @@ import (
 // TestPushAndPull verifies that a protobuf message can be pushed for a subject
 // and then pulled back, returning the correct metadata and FileDescriptorSet.
 func TestPushAndPull(t *testing.T) {
+	ctx := context.Background()
 	reg := newRegistryWithKeyValues(newMockKeyValue(), newMockKeyValue())
 
 	subject := "orders.created"
 	msg := wrapperspb.String("hello")
 
-	if err := reg.Push(subject, msg); err != nil {
+	if err := reg.Push(ctx, subject, msg); err != nil {
 		t.Fatalf("Push failed: %v", err)
 	}
 
-	fds, meta, err := reg.Pull(subject)
+	fds, meta, err := reg.Pull(ctx, subject)
 	if err != nil {
 		t.Fatalf("Pull failed: %v", err)
 	}
@@ -40,13 +44,14 @@ func TestPushAndPull(t *testing.T) {
 // TestPushAny verifies that a message with transitive imports (google.protobuf.Any)
 // is registered with the correct proto path and full name.
 func TestPushAny(t *testing.T) {
+	ctx := context.Background()
 	reg := newRegistryWithKeyValues(newMockKeyValue(), newMockKeyValue())
 
-	if err := reg.Push("events.any", &anypb.Any{}); err != nil {
+	if err := reg.Push(ctx, "events.any", &anypb.Any{}); err != nil {
 		t.Fatalf("Push failed: %v", err)
 	}
 
-	_, meta, err := reg.Pull("events.any")
+	_, meta, err := reg.Pull(ctx, "events.any")
 	if err != nil {
 		t.Fatalf("Pull failed: %v", err)
 	}
@@ -58,25 +63,72 @@ func TestPushAny(t *testing.T) {
 	}
 }
 
-// TestPullNotFound verifies that Pull returns an error when the subject has not
-// been registered.
+// TestPullNotFound verifies that Pull blocks until the context is cancelled
+// when the subject has not been registered.
 func TestPullNotFound(t *testing.T) {
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
 	reg := newRegistryWithKeyValues(newMockKeyValue(), newMockKeyValue())
 
-	_, _, err := reg.Pull("unknown.subject")
+	_, _, err := reg.Pull(ctx, "unknown.subject")
 	if err == nil {
 		t.Fatal("expected error for missing subject")
 	}
 }
 
-// TestPushValidation verifies that Push rejects invalid arguments.
-func TestPushValidation(t *testing.T) {
+// TestPullWaitsForPush verifies that Pull can start before a subject is
+// registered and returns once the matching schema is pushed.
+func TestPullWaitsForPush(t *testing.T) {
+	ctx := context.Background()
 	reg := newRegistryWithKeyValues(newMockKeyValue(), newMockKeyValue())
 
-	if err := reg.Push("", wrapperspb.String("x")); err == nil {
+	subject := "orders.created"
+	msg := wrapperspb.String("hello")
+
+	type result struct {
+		fds  *descriptorpb.FileDescriptorSet
+		meta *Metadata
+		err  error
+	}
+	ch := make(chan result, 1)
+
+	go func() {
+		fds, meta, err := reg.Pull(ctx, subject)
+		ch <- result{fds, meta, err}
+	}()
+
+	time.Sleep(50 * time.Millisecond)
+
+	if err := reg.Push(ctx, subject, msg); err != nil {
+		t.Fatalf("Push failed: %v", err)
+	}
+
+	select {
+	case res := <-ch:
+		if res.err != nil {
+			t.Fatalf("Pull failed: %v", res.err)
+		}
+		if res.meta.Schema.FullName != "google.protobuf.StringValue" {
+			t.Errorf("unexpected full name: %s", res.meta.Schema.FullName)
+		}
+		if len(res.fds.File) == 0 {
+			t.Error("lookup returned empty descriptor set")
+		}
+	case <-time.After(time.Second):
+		t.Fatal("Pull did not return after Push")
+	}
+}
+
+// TestPushValidation verifies that Push rejects invalid arguments.
+func TestPushValidation(t *testing.T) {
+	ctx := context.Background()
+	reg := newRegistryWithKeyValues(newMockKeyValue(), newMockKeyValue())
+
+	if err := reg.Push(ctx, "", wrapperspb.String("x")); err == nil {
 		t.Error("expected error for empty subject")
 	}
-	if err := reg.Push("sub", nil); err == nil {
+	if err := reg.Push(ctx, "sub", nil); err == nil {
 		t.Error("expected error for nil message")
 	}
 }
@@ -102,18 +154,26 @@ func TestBuildFileDescriptorSetIncludesDependencies(t *testing.T) {
 }
 
 // mockKeyValue is a minimal in-memory implementation of nats.KeyValue for unit
-// testing.
+// testing. It supports live watchers so that Pull can wait for keys that do not
+// yet exist.
 type mockKeyValue struct {
-	data map[string][]byte
+	mu       sync.Mutex
+	data     map[string][]byte
+	watchers map[string][]*mockWatcher
 }
 
 func newMockKeyValue() *mockKeyValue {
-	return &mockKeyValue{data: make(map[string][]byte)}
+	return &mockKeyValue{
+		data:     make(map[string][]byte),
+		watchers: make(map[string][]*mockWatcher),
+	}
 }
 
 // Create stores a new key. It returns nats.ErrKeyExists if the key is already
 // present.
 func (m *mockKeyValue) Create(key string, value []byte) (uint64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if _, ok := m.data[key]; ok {
 		return 0, nats.ErrKeyExists
 	}
@@ -121,19 +181,58 @@ func (m *mockKeyValue) Create(key string, value []byte) (uint64, error) {
 	return 1, nil
 }
 
-// Put stores or overwrites a key.
+// Put stores or overwrites a key and notifies any active watchers.
 func (m *mockKeyValue) Put(key string, value []byte) (uint64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.data[key] = value
+	for _, w := range m.watchers[key] {
+		select {
+		case w.updates <- &mockEntry{key: key, value: value}:
+		case <-w.ctx.Done():
+		}
+	}
 	return 1, nil
 }
 
 // Get returns the value for a key, or nats.ErrKeyNotFound if it does not exist.
 func (m *mockKeyValue) Get(key string) (nats.KeyValueEntry, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	v, ok := m.data[key]
 	if !ok {
 		return nil, nats.ErrKeyNotFound
 	}
 	return &mockEntry{key: key, value: v}, nil
+}
+
+// Watch creates a watcher for the given key. If the key already exists, the
+// current value is emitted first, followed by a nil marker. Subsequent Put
+// calls for the key are delivered to the watcher.
+func (m *mockKeyValue) Watch(key string, opts ...nats.WatchOpt) (nats.KeyWatcher, error) {
+	ctx := context.Background()
+	for _, opt := range opts {
+		if opt != nil {
+			if c, ok := opt.(context.Context); ok {
+				ctx = c
+			}
+		}
+	}
+
+	w := &mockWatcher{
+		updates: make(chan nats.KeyValueEntry, 4),
+		ctx:     ctx,
+	}
+
+	m.mu.Lock()
+	if v, ok := m.data[key]; ok {
+		w.updates <- &mockEntry{key: key, value: v}
+	}
+	w.updates <- nil
+	m.watchers[key] = append(m.watchers[key], w)
+	m.mu.Unlock()
+
+	return w, nil
 }
 
 // The remaining methods are required to satisfy the nats.KeyValue interface but
@@ -179,10 +278,6 @@ func (m *mockKeyValue) Purge(string, ...nats.DeleteOpt) error {
 	return errors.New("not implemented")
 }
 
-func (m *mockKeyValue) Watch(string, ...nats.WatchOpt) (nats.KeyWatcher, error) {
-	return nil, errors.New("not implemented")
-}
-
 func (m *mockKeyValue) WatchAll(...nats.WatchOpt) (nats.KeyWatcher, error) {
 	return nil, errors.New("not implemented")
 }
@@ -190,6 +285,19 @@ func (m *mockKeyValue) WatchAll(...nats.WatchOpt) (nats.KeyWatcher, error) {
 func (m *mockKeyValue) Status() (nats.KeyValueStatus, error) {
 	return nil, errors.New("not implemented")
 }
+
+// mockWatcher is a minimal in-memory implementation of nats.KeyWatcher.
+type mockWatcher struct {
+	updates chan nats.KeyValueEntry
+	ctx     context.Context
+}
+
+func (w *mockWatcher) Updates() <-chan nats.KeyValueEntry { return w.updates }
+func (w *mockWatcher) Stop() error {
+	close(w.updates)
+	return nil
+}
+func (w *mockWatcher) Context() context.Context { return w.ctx }
 
 // mockEntry is a minimal in-memory implementation of nats.KeyValueEntry.
 type mockEntry struct {

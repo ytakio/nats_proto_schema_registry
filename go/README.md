@@ -27,6 +27,7 @@ Connect to NATS, create a `Registry`, and push or pull schemas.
 package main
 
 import (
+    "context"
     "log"
 
     "github.com/nats-io/nats.go"
@@ -51,7 +52,9 @@ func main() {
         log.Fatal(err)
     }
 
-    if err := reg.Push("orders.created", wrapperspb.String("order-123")); err != nil {
+    ctx := context.Background()
+
+    if err := reg.Push(ctx, "orders.created", wrapperspb.String("order-123")); err != nil {
         log.Fatal(err)
     }
 }
@@ -60,7 +63,10 @@ func main() {
 ### Look up a schema
 
 ```go
-fds, meta, err := reg.Pull("orders.created")
+ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+defer cancel()
+
+fds, meta, err := reg.Pull(ctx, "orders.created")
 if err != nil {
     log.Fatal(err)
 }
@@ -74,8 +80,10 @@ fmt.Println(len(fds.File))         // number of files in descriptor set
 
 The main entry point is the `Registry` interface in `types.go`:
 
-- `Push(subject, msg)` - register a generated protobuf message.
-- `Pull(subject)` - retrieve the `FileDescriptorSet` and `Metadata`.
+- `Push(ctx, subject, msg)` - register a generated protobuf message.
+- `Pull(ctx, subject)` - retrieve the `FileDescriptorSet` and `Metadata`. `Pull`
+  watches the metadata and schema buckets, so it blocks until the requested
+  subject is registered or `ctx` is cancelled.
 
 ## Bucket configuration
 

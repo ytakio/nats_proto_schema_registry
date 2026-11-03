@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"log"
 
@@ -26,7 +27,8 @@ func main() {
 	}
 
 	subject := "orders.created"
-	fds, meta, err := reg.Pull(subject)
+	ctx := context.Background()
+	fds, meta, err := reg.Pull(ctx, subject)
 	if err != nil {
 		log.Fatalf("pull: %v", err)
 	}

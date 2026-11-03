@@ -12,6 +12,8 @@
 package schemaregistry
 
 import (
+	"context"
+
 	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/descriptorpb"
 )
@@ -36,9 +38,10 @@ type Registry interface {
 	// Push inspects the protobuf message type of msg, builds a
 	// FileDescriptorSet containing the message's file and its transitive
 	// dependencies, and stores it in the registry under the given subject.
-	Push(subject string, msg proto.Message) error
+	Push(ctx context.Context, subject string, msg proto.Message) error
 
 	// Pull returns the FileDescriptorSet and metadata associated with the
-	// given NATS subject.
-	Pull(subject string) (*descriptorpb.FileDescriptorSet, *Metadata, error)
+	// given NATS subject. It watches the registry buckets and blocks until the
+	// subject is registered or ctx is cancelled.
+	Pull(ctx context.Context, subject string) (*descriptorpb.FileDescriptorSet, *Metadata, error)
 }

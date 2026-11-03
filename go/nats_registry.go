@@ -1,6 +1,7 @@
 package schemaregistry
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -58,7 +59,10 @@ func getOrCreateKV(js nats.JetStreamContext, bucket string) (nats.KeyValue, erro
 }
 
 // Push implements Registry.Push.
-func (r *NatsRegistry) Push(subject string, msg proto.Message) error {
+func (r *NatsRegistry) Push(ctx context.Context, subject string, msg proto.Message) error {
+	if ctx == nil {
+		return errors.New("schemaregistry: context is required")
+	}
 	if subject == "" {
 		return errors.New("schemaregistry: subject is required")
 	}
@@ -98,17 +102,21 @@ func (r *NatsRegistry) Push(subject string, msg proto.Message) error {
 }
 
 // Pull implements Registry.Pull.
-func (r *NatsRegistry) Pull(subject string) (*descriptorpb.FileDescriptorSet, *Metadata, error) {
+//
+// Pull watches the metadata bucket for the subject and then watches the schema
+// bucket for the referenced .proto file. If either key does not exist yet, Pull
+// blocks until it is created or until ctx is cancelled.
+func (r *NatsRegistry) Pull(ctx context.Context, subject string) (*descriptorpb.FileDescriptorSet, *Metadata, error) {
+	if ctx == nil {
+		return nil, nil, errors.New("schemaregistry: context is required")
+	}
 	if subject == "" {
 		return nil, nil, errors.New("schemaregistry: subject is required")
 	}
 
-	metaEntry, err := r.metadataKV.Get(subject)
+	metaEntry, err := r.watchKey(ctx, r.metadataKV, subject)
 	if err != nil {
-		if errors.Is(err, nats.ErrKeyNotFound) {
-			return nil, nil, fmt.Errorf("schemaregistry: subject %q not found", subject)
-		}
-		return nil, nil, fmt.Errorf("schemaregistry: get metadata for subject %q: %w", subject, err)
+		return nil, nil, fmt.Errorf("schemaregistry: wait for metadata for subject %q: %w", subject, err)
 	}
 
 	var meta Metadata
@@ -116,12 +124,9 @@ func (r *NatsRegistry) Pull(subject string) (*descriptorpb.FileDescriptorSet, *M
 		return nil, nil, fmt.Errorf("schemaregistry: unmarshal metadata for subject %q: %w", subject, err)
 	}
 
-	schemaEntry, err := r.schemaKV.Get(meta.Schema.Path)
+	schemaEntry, err := r.watchKey(ctx, r.schemaKV, meta.Schema.Path)
 	if err != nil {
-		if errors.Is(err, nats.ErrKeyNotFound) {
-			return nil, nil, fmt.Errorf("schemaregistry: schema %q for subject %q not found", meta.Schema.Path, subject)
-		}
-		return nil, nil, fmt.Errorf("schemaregistry: get schema %q: %w", meta.Schema.Path, err)
+		return nil, nil, fmt.Errorf("schemaregistry: wait for schema %q: %w", meta.Schema.Path, err)
 	}
 
 	var fds descriptorpb.FileDescriptorSet
@@ -132,7 +137,32 @@ func (r *NatsRegistry) Pull(subject string) (*descriptorpb.FileDescriptorSet, *M
 	return &fds, &meta, nil
 }
 
-// Close implements Registry.Close.
-func (r *NatsRegistry) Close() error {
-	return nil
+// watchKey waits until the given key exists in kv and returns it. Deleted or
+// purged entries are ignored so that Pull waits for a real value. If ctx is
+// cancelled, watchKey returns the context error.
+func (r *NatsRegistry) watchKey(ctx context.Context, kv nats.KeyValue, key string) (nats.KeyValueEntry, error) {
+	watcher, err := kv.Watch(key, nats.Context(ctx))
+	if err != nil {
+		return nil, err
+	}
+	defer watcher.Stop()
+
+	for {
+		select {
+		case entry, ok := <-watcher.Updates():
+			if !ok {
+				return nil, ctx.Err()
+			}
+			if entry == nil {
+				// Initial state marker; keep waiting for a real value.
+				continue
+			}
+			if entry.Operation() == nats.KeyValueDelete || entry.Operation() == nats.KeyValuePurge {
+				continue
+			}
+			return entry, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}
 }
