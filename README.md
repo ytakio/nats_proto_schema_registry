@@ -44,4 +44,3 @@ message type.
 ## Specification
 
 See [SPECIFICATION.md](./SPECIFICATION.md) for the detailed design.
-

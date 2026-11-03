@@ -1,13 +1,16 @@
 # MCAP Example
 
-This example shows the schema registry's "lookup that waits" behaviour:
+This example shows the schema registry's "lookup that waits" behaviour. It also
+uses `google.protobuf.Type` in `SensorReading` so that the registered schema
+includes transitive Google imports (`type.proto` → `any.proto` and
+`source_context.proto`).
 
 1. The **recorder** starts first, subscribes to a NATS subject, and waits for
    the schema to appear in the registry.
 2. The **producer** starts afterwards, registers the schema, and publishes
    `SensorReading` messages at 1 Hz for 30 seconds.
-3. The recorder resolves the schema, opens an MCAP file, and writes every
-   received message to it.
+3. The recorder resolves the full `FileDescriptorSet` (including all transitive
+   imports), opens an MCAP file, and writes every received message to it.
 
 ## Running
 
@@ -45,4 +48,3 @@ Or use the convenience target in `go/Makefile`:
 cd go
 make run-mcap-example
 ```
-

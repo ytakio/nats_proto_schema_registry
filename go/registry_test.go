@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/nats-io/nats.go"
+	"github.com/ytakio/nats_proto_schema_registry/go/example/mcap/sensorpb"
 	"google.golang.org/protobuf/types/descriptorpb"
 	"google.golang.org/protobuf/types/known/anypb"
 	"google.golang.org/protobuf/types/known/wrapperspb"
@@ -150,6 +151,35 @@ func TestBuildFileDescriptorSetIncludesDependencies(t *testing.T) {
 	}
 	if !found {
 		t.Error("expected any.proto in descriptor set")
+	}
+}
+
+// TestBuildFileDescriptorSetIncludesTransitiveGoogleImports verifies that a
+// message importing google.protobuf.Type also includes the transitive Google
+// imports (any.proto and source_context.proto) in the descriptor set. This
+// mirrors the dependency chain used by the mcap example's SensorReading.
+func TestBuildFileDescriptorSetIncludesTransitiveGoogleImports(t *testing.T) {
+	fds := buildFileDescriptorSet((&sensorpb.SensorReading{}).ProtoReflect().Descriptor().ParentFile())
+	if len(fds.File) == 0 {
+		t.Fatal("expected files in descriptor set")
+	}
+
+	required := []string{
+		"google/protobuf/type.proto",
+		"google/protobuf/any.proto",
+		"google/protobuf/source_context.proto",
+	}
+	for _, name := range required {
+		found := false
+		for _, f := range fds.File {
+			if f.GetName() == name {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected %s in descriptor set", name)
+		}
 	}
 }
 

@@ -11,10 +11,11 @@ import (
 	schemaregistry "github.com/ytakio/nats_proto_schema_registry/go"
 	"github.com/ytakio/nats_proto_schema_registry/go/example/mcap/sensorpb"
 	"google.golang.org/protobuf/proto"
+	"google.golang.org/protobuf/types/known/typepb"
 )
 
 func main() {
-	url := flag.String("url", nats.DefaultURL, "NATS server URL")
+	url := flag.String("url", "nats://localhost:4444", "NATS server URL")
 	subject := flag.String("subject", "sensor.readings", "NATS subject to publish on")
 	metadataBucket := flag.String("metadata-bucket", "metadata", "metadata KV bucket name")
 	schemaBucket := flag.String("schema-bucket", "schemas", "schema KV bucket name")
@@ -55,6 +56,10 @@ func main() {
 			Humidity:    50.0 + float64(i)*0.2,
 			Pressure:    1013.0 + float64(i)*0.05,
 			TimestampNs: now.UnixNano(),
+			DeviceType: &typepb.Type{
+				Name:   "sensorpb.SensorReading",
+				Syntax: typepb.Syntax_SYNTAX_PROTO3,
+			},
 		}
 
 		data, err := proto.Marshal(msg)

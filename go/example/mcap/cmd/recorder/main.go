@@ -15,7 +15,7 @@ import (
 )
 
 func main() {
-	url := flag.String("url", nats.DefaultURL, "NATS server URL")
+	url := flag.String("url", "nats://localhost:4444", "NATS server URL")
 	subject := flag.String("subject", "sensor.readings", "NATS subject to record")
 	metadataBucket := flag.String("metadata-bucket", "metadata", "metadata KV bucket name")
 	schemaBucket := flag.String("schema-bucket", "schemas", "schema KV bucket name")

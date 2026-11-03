@@ -10,7 +10,7 @@ import (
 )
 
 func main() {
-	nc, err := nats.Connect(nats.DefaultURL)
+	nc, err := nats.Connect("nats://localhost:4444")
 	if err != nil {
 		log.Fatalf("connect: %v", err)
 	}
