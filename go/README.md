@@ -102,6 +102,9 @@ make test-race   # go test -race ./...
 make vet         # go vet ./...
 make fmt         # go fmt ./...
 make check       # fmt + vet + race tests
+make proto       # regenerate the protobuf code used by the mcap example
+make up          # start NATS with JetStream (docker compose)
+make run-mcap-example
 ```
 
 ## Storage layout
@@ -112,4 +115,11 @@ make check       # fmt + vet + race tests
 - Schema bucket (configured by caller):
   - Key: `.proto` file path (e.g. `google/protobuf/wrappers.proto`)
   - Value: serialized `google.protobuf.FileDescriptorSet`
+
+## Examples
+
+- [example/register](./example/register) - register a schema for a subject.
+- [example/lookup](./example/lookup) - look a schema up, waiting for it.
+- [example/mcap](./example/mcap) - producer and receiver that records messages
+  to an MCAP file, resolving the schema through the lookup.
 
