@@ -74,7 +74,7 @@ func main() {
 	}
 	defer writer.Close()
 
-	if err := writer.WriteHeader(&mcap.Header{}); err != nil {
+	if err := writer.WriteHeader(&mcap.Header{Profile: "protobuf"}); err != nil {
 		log.Fatalf("write header: %v", err)
 	}
 
@@ -83,6 +83,9 @@ func main() {
 		log.Fatalf("marshal schema: %v", err)
 	}
 
+	// MCAP schema IDs must be non-zero, while channel IDs may be zero. The two
+	// ID spaces are independent, so we start the schema at 1 and the channel at
+	// 0 to reflect the specification's distinction.
 	schema := &mcap.Schema{
 		ID:       1,
 		Name:     meta.Schema.FullName,
@@ -94,7 +97,7 @@ func main() {
 	}
 
 	channel := &mcap.Channel{
-		ID:              1,
+		ID:              0,
 		SchemaID:        schema.ID,
 		Topic:           *subject,
 		MessageEncoding: "protobuf",
