@@ -40,6 +40,7 @@ message type.
 ## Implementations
 
 - [Go](./go) - Go library with NATS KV backend.
+- [Python](./python) - Python library with NATS KV backend (requires Python 3.14+).
 
 ## Specification
 
