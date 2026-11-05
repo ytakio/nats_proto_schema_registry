@@ -5,6 +5,9 @@ import (
 	"flag"
 	"fmt"
 	"log"
+	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/nats-io/nats.go"
@@ -20,6 +23,10 @@ func main() {
 	metadataBucket := flag.String("metadata-bucket", "metadata", "metadata KV bucket name")
 	schemaBucket := flag.String("schema-bucket", "schemas", "schema KV bucket name")
 	flag.Parse()
+
+	// Stop cleanly on SIGINT/SIGTERM.
+	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	nc, err := nats.Connect(*url)
 	if err != nil {
@@ -37,45 +44,46 @@ func main() {
 		log.Fatalf("registry: %v", err)
 	}
 
-	ctx := context.Background()
-
 	// Register the schema for the subject. This unblocks the recorder which is
 	// waiting for the schema via Pull().
-	if err := reg.Push(ctx, *subject, &sensorpb.SensorReading{}); err != nil {
+	if err := reg.Push(sigCtx, *subject, &sensorpb.SensorReading{}); err != nil {
 		log.Fatalf("push schema: %v", err)
 	}
 	fmt.Printf("registered schema for subject %q\n", *subject)
 
-	// Publish one reading per second for 30 seconds.
-	const total = 30
-	for i := range total {
-		now := time.Now()
-		msg := &sensorpb.SensorReading{
-			Sequence:    uint64(i + 1),
-			Temperature: 20.0 + float64(i)*0.1,
-			Humidity:    50.0 + float64(i)*0.2,
-			Pressure:    1013.0 + float64(i)*0.05,
-			TimestampNs: now.UnixNano(),
-			DeviceType: &typepb.Type{
-				Name:   "sensorpb.SensorReading",
-				Syntax: typepb.Syntax_SYNTAX_PROTO3,
-			},
-		}
+	// Publish one reading per second until a signal requests shutdown.
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
 
-		data, err := proto.Marshal(msg)
-		if err != nil {
-			log.Fatalf("marshal: %v", err)
-		}
+	var seq uint64
+	for {
+		select {
+		case <-sigCtx.Done():
+			fmt.Printf("producer shutting down after %d messages\n", seq)
+			return
+		case now := <-ticker.C:
+			seq++
+			msg := &sensorpb.SensorReading{
+				Sequence:    seq,
+				Temperature: 20.0 + float64(seq)*0.1,
+				Humidity:    50.0 + float64(seq)*0.2,
+				Pressure:    1013.0 + float64(seq)*0.05,
+				TimestampNs: now.UnixNano(),
+				DeviceType: &typepb.Type{
+					Name:   "sensorpb.SensorReading",
+					Syntax: typepb.Syntax_SYNTAX_PROTO3,
+				},
+			}
 
-		if err := nc.Publish(*subject, data); err != nil {
-			log.Fatalf("publish: %v", err)
-		}
-		fmt.Printf("published seq=%d\n", msg.Sequence)
+			data, err := proto.Marshal(msg)
+			if err != nil {
+				log.Fatalf("marshal: %v", err)
+			}
 
-		if i < total-1 {
-			time.Sleep(time.Until(now.Add(time.Second)))
+			if err := nc.Publish(*subject, data); err != nil {
+				log.Fatalf("publish: %v", err)
+			}
+			fmt.Printf("published seq=%d\n", msg.Sequence)
 		}
 	}
-
-	fmt.Println("producer finished")
 }

@@ -1,7 +1,11 @@
-.PHONY: build test test-race vet fmt lint check clean proto up down run-mcap-example
+.PHONY: build build-example-mcap test test-race vet fmt lint check clean proto up down run-mcap-example
 
 build:
 	go build ./...
+
+build-example-mcap:
+	go build -o recorder ./example/mcap/cmd/recorder
+	go build -o producer ./example/mcap/cmd/producer
 
 test:
 	go test ./...
@@ -37,12 +41,15 @@ up:
 down:
 	$(COMPOSE) -f $(COMPOSE_FILE) down
 
-run-mcap-example: build
+run-mcap-example: build-example-mcap
 	$(COMPOSE) -f $(COMPOSE_FILE) up -d
-	go run ./example/mcap/cmd/recorder &
-	RECORDER_PID=$$!; \
+	./recorder & RECORDER_PID=$$!; \
 	sleep 2; \
-	go run ./example/mcap/cmd/producer; \
+	./producer & PRODUCER_PID=$$!; \
+	sleep 10; \
+	kill -s INT $$RECORDER_PID; \
+	kill -s INT $$PRODUCER_PID; \
 	wait $$RECORDER_PID; \
-	$(COMPOSE) -f $(COMPOSE_FILE) down
-
+	wait $$PRODUCER_PID; \
+	rm -f recorder producer; \
+	$(COMPOSE) -f $(COMPOSE_FILE) down --remove-orphans 

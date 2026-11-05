@@ -6,6 +6,8 @@ import (
 	"fmt"
 	"log"
 	"os"
+	"os/signal"
+	"syscall"
 	"time"
 
 	"github.com/foxglove/mcap/go/mcap"
@@ -20,8 +22,11 @@ func main() {
 	metadataBucket := flag.String("metadata-bucket", "metadata", "metadata KV bucket name")
 	schemaBucket := flag.String("schema-bucket", "schemas", "schema KV bucket name")
 	output := flag.String("output", "sensor.mcap", "output MCAP file")
-	recordDuration := flag.Duration("duration", 35*time.Second, "how long to record before stopping")
 	flag.Parse()
+
+	// Stop cleanly on SIGINT/SIGTERM in addition to the normal stop conditions.
+	sigCtx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
 
 	nc, err := nats.Connect(*url)
 	if err != nil {
@@ -40,8 +45,13 @@ func main() {
 	}
 
 	// Subscribe before waiting for the schema so messages published while we are
-	// waiting are buffered by the NATS client.
-	sub, err := nc.SubscribeSync(*subject)
+	// waiting are buffered. We use an async subscription with a small application
+	// channel instead of SubscribeSync to avoid the large per-subscription queue
+	// allocated by the synchronous API.
+	msgCh := make(chan *nats.Msg, 256)
+	sub, err := nc.Subscribe(*subject, func(msg *nats.Msg) {
+		msgCh <- msg
+	})
 	if err != nil {
 		log.Fatalf("subscribe: %v", err)
 	}
@@ -49,7 +59,7 @@ func main() {
 	fmt.Printf("recorder subscribed to %q, waiting for schema...\n", *subject)
 
 	// Pull blocks until the producer registers the schema.
-	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+	ctx, cancel := context.WithTimeout(sigCtx, 2*time.Minute)
 	defer cancel()
 
 	fds, meta, err := reg.Pull(ctx, *subject)
@@ -106,41 +116,26 @@ func main() {
 		log.Fatalf("write channel: %v", err)
 	}
 
-	// Record messages until the duration elapses or no message arrives for a
-	// short grace period.
-	deadline := time.NewTimer(*recordDuration)
-	defer deadline.Stop()
-
-	idleTimeout := 3 * time.Second
-	var received uint64
+	// Record messages until a signal requests shutdown.
+	var received uint32
 	for {
 		select {
-		case <-deadline.C:
-			fmt.Printf("recording duration reached, wrote %d messages\n", received)
+		case <-sigCtx.Done():
+			fmt.Printf("shutdown signal received, wrote %d messages\n", received)
 			return
-		default:
-		}
-
-		msg, err := sub.NextMsg(idleTimeout)
-		if err != nil {
-			if err == nats.ErrTimeout {
-				fmt.Printf("idle timeout, wrote %d messages\n", received)
-				return
+		case msg := <-msgCh:
+			received++
+			now := time.Now().UnixNano()
+			if err := writer.WriteMessage(&mcap.Message{
+				ChannelID:   channel.ID,
+				Sequence:    received,
+				LogTime:     uint64(now),
+				PublishTime: uint64(now),
+				Data:        msg.Data,
+			}); err != nil {
+				log.Fatalf("write message: %v", err)
 			}
-			log.Fatalf("next message: %v", err)
+			fmt.Printf("recorded seq=%d\n", received)
 		}
-
-		received++
-		now := time.Now().UnixNano()
-		if err := writer.WriteMessage(&mcap.Message{
-			ChannelID:   channel.ID,
-			Sequence:    uint32(received),
-			LogTime:     uint64(now),
-			PublishTime: uint64(now),
-			Data:        msg.Data,
-		}); err != nil {
-			log.Fatalf("write message: %v", err)
-		}
-		fmt.Printf("recorded seq=%d\n", received)
 	}
 }
