@@ -1,0 +1,22 @@
+syntax = "proto3";
+
+package sensorpb;
+option cc_enable_arenas = true;
+option go_package = "github.com/ytakio/nats_proto_schema_registry/go/example/mcap/sensorpb";
+
+import "google/protobuf/type.proto";
+
+message SensorReading {
+  uint64 sequence = 1;
+  double temperature = 2;
+  double humidity = 3;
+  double pressure = 4;
+  int64 timestamp_ns = 5;
+
+  // A google.protobuf.Type is used here so the example demonstrates a
+  // transitive Google dependency: sensor.proto -> type.proto -> any.proto and
+  // source_context.proto. The schema registry stores the full
+  // FileDescriptorSet including all transitive imports.
+  google.protobuf.Type device_type = 6;
+}
+
