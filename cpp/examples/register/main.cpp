@@ -23,6 +23,7 @@
 #include <google/protobuf/wrappers.pb.h>
 
 #include <cstdlib>
+#include <format>
 #include <iostream>
 #include <stop_token>
 #include <string>
@@ -34,21 +35,20 @@ int main() {
 
   s = natsConnection_ConnectTo(&conn, "nats://localhost:4444");
   if (s != NATS_OK) {
-    std::cerr << "connect: " << natsStatus_GetText(s) << std::endl;
+    std::cerr << std::format("connect: {}\n", natsStatus_GetText(s));
     return EXIT_FAILURE;
   }
 
   s = natsConnection_JetStream(&js, conn, nullptr);
   if (s != NATS_OK) {
-    std::cerr << "jetstream: " << natsStatus_GetText(s) << std::endl;
+    std::cerr << std::format("jetstream: {}\n", natsStatus_GetText(s));
     natsConnection_Destroy(conn);
     return EXIT_FAILURE;
   }
 
-  std::error_code ec;
-  auto reg = schemaregistry::create_registry(js, "metadata", "schemas", ec);
-  if (ec) {
-    std::cerr << "registry: " << ec.message() << std::endl;
+  auto [reg, reg_err] = schemaregistry::create_registry(js, "metadata", "schemas");
+  if (reg_err) {
+    std::cerr << std::format("registry: {}\n", reg_err.message());
     jsCtx_Destroy(js);
     natsConnection_Destroy(conn);
     return EXIT_FAILURE;
@@ -58,15 +58,15 @@ int main() {
   google::protobuf::StringValue msg;
   msg.set_value("order-123");
 
-  ec = reg->push({}, subject, msg);
-  if (ec) {
-    std::cerr << "push: " << ec.message() << std::endl;
+  auto push_err = reg->push({}, subject, msg);
+  if (push_err) {
+    std::cerr << std::format("push: {}\n", push_err.message());
     jsCtx_Destroy(js);
     natsConnection_Destroy(conn);
     return EXIT_FAILURE;
   }
 
-  std::cout << "pushed schema for subject \"" << subject << "\"" << std::endl;
+  std::cout << std::format("pushed schema for subject \"{}\"\n", subject);
 
   jsCtx_Destroy(js);
   natsConnection_Destroy(conn);

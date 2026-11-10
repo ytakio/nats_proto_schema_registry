@@ -26,6 +26,7 @@
 #include <atomic>
 #include <csignal>
 #include <cstdlib>
+#include <format>
 #include <fstream>
 #include <iostream>
 #include <stop_token>
@@ -71,21 +72,20 @@ int main(int argc, char **argv) {
 
   s = natsConnection_ConnectTo(&conn, url.c_str());
   if (s != NATS_OK) {
-    std::cerr << "connect: " << natsStatus_GetText(s) << std::endl;
+    std::cerr << std::format("connect: {}\n", natsStatus_GetText(s));
     return EXIT_FAILURE;
   }
 
   s = natsConnection_JetStream(&js, conn, nullptr);
   if (s != NATS_OK) {
-    std::cerr << "jetstream: " << natsStatus_GetText(s) << std::endl;
+    std::cerr << std::format("jetstream: {}\n", natsStatus_GetText(s));
     natsConnection_Destroy(conn);
     return EXIT_FAILURE;
   }
 
-  std::error_code ec;
-  auto reg = schemaregistry::create_registry(js, metadata_bucket, schema_bucket, ec);
-  if (ec) {
-    std::cerr << "registry: " << ec.message() << std::endl;
+  auto [reg, reg_err] = schemaregistry::create_registry(js, metadata_bucket, schema_bucket);
+  if (reg_err) {
+    std::cerr << std::format("registry: {}\n", reg_err.message());
     jsCtx_Destroy(js);
     natsConnection_Destroy(conn);
     return EXIT_FAILURE;
@@ -96,38 +96,32 @@ int main(int argc, char **argv) {
   natsSubscription *sub = nullptr;
   s = natsConnection_Subscribe(&sub, conn, subject.c_str(), nullptr, nullptr);
   if (s != NATS_OK) {
-    std::cerr << "subscribe: " << natsStatus_GetText(s) << std::endl;
+    std::cerr << std::format("subscribe: {}\n", natsStatus_GetText(s));
     jsCtx_Destroy(js);
     natsConnection_Destroy(conn);
     return EXIT_FAILURE;
   }
-  std::cout << "recorder subscribed to \"" << subject
-            << "\", waiting for schema..." << std::endl;
+  std::cout << std::format(
+      "recorder subscribed to \"{}\", waiting for schema...\n", subject);
 
   // Pull blocks until the producer registers the schema.
-  auto result = reg->pull({}, subject, ec);
-  if (ec) {
-    std::cerr << "pull schema: " << ec.message() << std::endl;
-    natsSubscription_Destroy(sub);
-    jsCtx_Destroy(js);
-    natsConnection_Destroy(conn);
-    return EXIT_FAILURE;
-  }
-  if (!result) {
-    std::cerr << "pull schema: no result" << std::endl;
+  auto [result, pull_err] = reg->pull({}, subject);
+  if (pull_err) {
+    std::cerr << std::format("pull schema: {}\n", pull_err.message());
     natsSubscription_Destroy(sub);
     jsCtx_Destroy(js);
     natsConnection_Destroy(conn);
     return EXIT_FAILURE;
   }
 
-  std::cout << "resolved schema " << result->meta.schema.full_name << " ("
-            << result->meta.schema.path << ")" << std::endl;
+  std::cout << std::format("resolved schema {} ({})\n",
+                           result.meta.schema.full_name,
+                           result.meta.schema.path);
 
   // Open the MCAP file and register the schema/channel.
   std::ofstream out(output, std::ios::binary);
   if (!out) {
-    std::cerr << "create output file: " << output << std::endl;
+    std::cerr << std::format("create output file: {}\n", output);
     natsSubscription_Destroy(sub);
     jsCtx_Destroy(js);
     natsConnection_Destroy(conn);
@@ -140,8 +134,8 @@ int main(int argc, char **argv) {
   writer.open(out, options);
 
   std::string schema_data;
-  if (!result->fds.SerializeToString(&schema_data)) {
-    std::cerr << "marshal schema" << std::endl;
+  if (!result.fds.SerializeToString(&schema_data)) {
+    std::cerr << std::format("marshal schema\n");
     writer.close();
     natsSubscription_Destroy(sub);
     jsCtx_Destroy(js);
@@ -151,7 +145,7 @@ int main(int argc, char **argv) {
 
   mcap::Schema schema;
   schema.id = 1;
-  schema.name = result->meta.schema.full_name;
+  schema.name = result.meta.schema.full_name;
   schema.encoding = "protobuf";
   schema.data =
       mcap::ByteArray(reinterpret_cast<const std::byte *>(schema_data.data()),
@@ -174,7 +168,7 @@ int main(int argc, char **argv) {
       continue;
     }
     if (s != NATS_OK) {
-      std::cerr << "next msg: " << natsStatus_GetText(s) << std::endl;
+      std::cerr << std::format("next msg: {}\n", natsStatus_GetText(s));
       break;
     }
 
@@ -199,19 +193,19 @@ int main(int argc, char **argv) {
 
     auto status = writer.write(mcap_msg);
     if (!status.ok()) {
-      std::cerr << "mcap write: " << status.message << std::endl;
+      std::cerr << std::format("mcap write: {}\n", status.message);
       natsMsg_Destroy(msg);
       break;
     }
     natsMsg_Destroy(msg);
 
-    std::cout << "recorded seq=" << received << std::endl;
+    std::cout << std::format("recorded seq={}\n", received);
   }
 
   writer.close();
   natsSubscription_Destroy(sub);
-  std::cout << "shutdown signal received, wrote " << received << " messages"
-            << std::endl;
+  std::cout <<
+      std::format("shutdown signal received, wrote {} messages\n", received);
 
   jsCtx_Destroy(js);
   natsConnection_Destroy(conn);
