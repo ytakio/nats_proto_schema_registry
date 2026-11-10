@@ -204,7 +204,8 @@ private:
       }
 
       const auto op = entry->operation();
-      if (op == KeyValueOperation::del || op == KeyValueOperation::purge) {
+      if (op == IKeyValueEntry::Operation::del ||
+          op == IKeyValueEntry::Operation::purge) {
         continue;
       }
 

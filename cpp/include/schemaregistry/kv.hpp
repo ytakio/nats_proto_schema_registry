@@ -34,22 +34,22 @@
 
 namespace schemaregistry {
 
-enum class KeyValueOperation {
-  unknown,
-  put,
-  del,
-  purge,
-};
-
 // IKeyValueEntry is a single entry returned from a KeyValue store.
 class IKeyValueEntry {
 public:
+  enum class Operation {
+    unknown,
+    put,
+    del,
+    purge,
+  };
+
   virtual ~IKeyValueEntry() = default;
 
   [[nodiscard]] virtual std::string_view key() const = 0;
   [[nodiscard]] virtual std::span<const std::byte> value() const = 0;
   [[nodiscard]] virtual std::uint64_t revision() const = 0;
-  [[nodiscard]] virtual KeyValueOperation operation() const = 0;
+  [[nodiscard]] virtual Operation operation() const = 0;
 };
 
 // IKeyWatcher watches a key in a KeyValue store.

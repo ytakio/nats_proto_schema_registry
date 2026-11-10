@@ -48,7 +48,7 @@ public:
     MockKeyValueEntry(
         std::string key,
         std::vector<std::byte> value,
-        KeyValueOperation op = KeyValueOperation::put
+        Operation op = Operation::put
     )
         : key_(std::move(key))
         , value_(std::move(value))
@@ -57,12 +57,12 @@ public:
     [[nodiscard]] std::string_view key() const override { return key_; }
     [[nodiscard]] std::span<const std::byte> value() const override { return value_; }
     [[nodiscard]] std::uint64_t revision() const override { return 1; }
-    [[nodiscard]] KeyValueOperation operation() const override { return operation_; }
+    [[nodiscard]] Operation operation() const override { return operation_; }
 
 private:
     std::string key_;
     std::vector<std::byte> value_;
-    KeyValueOperation operation_;
+    Operation operation_;
 };
 
 class MockKeyWatcher : public IKeyWatcher {

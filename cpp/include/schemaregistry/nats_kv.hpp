@@ -65,16 +65,16 @@ public:
     return kvEntry_Revision(entry_);
   }
 
-  [[nodiscard]] KeyValueOperation operation() const override {
+  [[nodiscard]] IKeyValueEntry::Operation operation() const override {
     switch (kvEntry_Operation(entry_)) {
     case kvOp_Put:
-      return KeyValueOperation::put;
+      return IKeyValueEntry::Operation::put;
     case kvOp_Delete:
-      return KeyValueOperation::del;
+      return IKeyValueEntry::Operation::del;
     case kvOp_Purge:
-      return KeyValueOperation::purge;
+      return IKeyValueEntry::Operation::purge;
     default:
-      return KeyValueOperation::unknown;
+      return IKeyValueEntry::Operation::unknown;
     }
   }
 
