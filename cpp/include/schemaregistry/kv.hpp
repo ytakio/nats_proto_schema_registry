@@ -65,7 +65,7 @@ public:
   virtual void stop() = 0;
 };
 
-// IKeyValue is a minimal abstraction over a NATS KV bucket.
+// IKeyValue is a minimal abstraction over a KeyValue bucket.
 class IKeyValue {
 public:
   using msec = std::chrono::milliseconds;
@@ -89,7 +89,7 @@ public:
   }
 
   // Retrieves the entry for key. Returns nullptr and sets ec on failure.
-  [[nodiscard]] virtual std::shared_ptr<IKeyValueEntry>
+  [[nodiscard]] virtual std::unique_ptr<IKeyValueEntry>
   get(std::string_view key, std::error_code &ec) = 0;
 
   // Create a watcher for the given key. The watcher yields the current value

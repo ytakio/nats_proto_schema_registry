@@ -151,7 +151,7 @@ public:
     return {};
   }
 
-  [[nodiscard]] std::shared_ptr<IKeyValueEntry>
+  [[nodiscard]] std::unique_ptr<IKeyValueEntry>
   get(std::string_view key, std::error_code &ec) override {
     kvEntry *kv_entry = nullptr;
     const std::string key_str{key};
@@ -165,7 +165,7 @@ public:
       return nullptr;
     }
     ec = {};
-    return std::make_shared<NatsKeyValueEntry>(kv_entry);
+    return std::make_unique<NatsKeyValueEntry>(kv_entry);
   }
 
   [[nodiscard]] std::unique_ptr<IKeyWatcher>

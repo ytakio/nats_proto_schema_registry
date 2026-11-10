@@ -196,7 +196,7 @@ public:
         return {};
     }
 
-    [[nodiscard]] std::shared_ptr<IKeyValueEntry>
+    [[nodiscard]] std::unique_ptr<IKeyValueEntry>
     get(std::string_view key, std::error_code &ec) override {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = data_.find(std::string(key));
@@ -205,7 +205,7 @@ public:
             return nullptr;
         }
         ec = {};
-        return std::make_shared<MockKeyValueEntry>(std::string(key), it->second);
+        return std::make_unique<MockKeyValueEntry>(std::string(key), it->second);
     }
 
     [[nodiscard]] std::unique_ptr<IKeyWatcher>

@@ -22,9 +22,6 @@
 
 #include <glaze/glaze.hpp>
 
-#include <google/protobuf/descriptor.h>
-#include <google/protobuf/descriptor.pb.h>
-
 #include <string>
 
 namespace schemaregistry {

@@ -25,6 +25,7 @@
 #include "schemaregistry/nats_kv.hpp"
 #include "schemaregistry/types.hpp"
 
+#include <google/protobuf/descriptor.pb.h>
 #include <google/protobuf/message.h>
 
 #include <glaze/glaze.hpp>
