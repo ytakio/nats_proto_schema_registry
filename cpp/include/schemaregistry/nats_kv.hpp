@@ -42,14 +42,6 @@
 
 namespace schemaregistry {
 
-namespace detail {
-
-inline std::span<const std::byte> to_byte_span(std::string_view value) {
-  return {reinterpret_cast<const std::byte *>(value.data()), value.size()};
-}
-
-} // namespace detail
-
 class NatsKeyValueEntry : public IKeyValueEntry {
 public:
   explicit NatsKeyValueEntry(kvEntry *entry) : entry_(entry) {}
@@ -93,8 +85,10 @@ private:
 
 class NatsKeyWatcher : public IKeyWatcher {
 public:
-  NatsKeyWatcher(kvWatcher *watcher, std::string key)
-      : watcher_(watcher), key_(std::move(key)) {}
+  NatsKeyWatcher(
+      kvWatcher *watcher, std::string key,
+      std::chrono::milliseconds timeout = std::chrono::milliseconds{1000})
+      : watcher_(watcher), key_(std::move(key)), timeout_(timeout) {}
 
   ~NatsKeyWatcher() override { kvWatcher_Destroy(watcher_); }
 
@@ -103,8 +97,8 @@ public:
   NatsKeyWatcher(NatsKeyWatcher &&) = delete;
   NatsKeyWatcher &operator=(NatsKeyWatcher &&) = delete;
 
-  [[nodiscard]] std::pair<std::shared_ptr<IKeyValueEntry>, std::error_code>
-  next(std::stop_token stop_token) override {
+  [[nodiscard]] std::shared_ptr<IKeyValueEntry>
+  next(std::stop_token stop_token, std::error_code &ec) override {
     // Use a stop callback to interrupt the blocking watcher when
     // cancellation is requested. A small functor avoids the heap
     // allocation that std::function would incur.
@@ -124,15 +118,16 @@ public:
     if (s == NATS_TIMEOUT) {
       // Timeout with no update. Return nullptr entry so the caller can
       // retry while still respecting cancellation.
-      return {std::shared_ptr<IKeyValueEntry>{}, {}};
+      return {};
     }
     if (s != NATS_OK) {
-      return {nullptr, make_nats_error(s)};
+      ec = make_nats_error(s);
+      return nullptr;
     }
     if (entry == nullptr) {
-      return {std::shared_ptr<IKeyValueEntry>{}, {}};
+      return {};
     }
-    return {std::make_shared<NatsKeyValueEntry>(entry), {}};
+    return std::make_shared<NatsKeyValueEntry>(entry);
   }
 
   void stop() override { kvWatcher_Stop(watcher_); }
@@ -154,48 +149,53 @@ public:
   NatsKeyValue(NatsKeyValue &&) = delete;
   NatsKeyValue &operator=(NatsKeyValue &&) = delete;
 
-  [[nodiscard]] std::pair<std::uint64_t, std::error_code>
-  put(std::string_view key, std::span<const std::byte> value) override {
-    uint64_t rev = 0;
+  [[nodiscard]] std::error_code put(std::string_view key,
+                                    std::span<const std::byte> value,
+                                    std::uint64_t &rev) override {
     const std::string key_str{key};
     const natsStatus s =
         kvStore_Put(&rev, store_, key_str.c_str(), value.data(),
                     static_cast<int>(value.size()));
     if (s != NATS_OK) {
-      return {0, make_nats_error(s)};
+      return make_nats_error(s);
     }
-    return {std::uint64_t{rev}, {}};
+    return {};
   }
 
-  [[nodiscard]] std::pair<std::shared_ptr<IKeyValueEntry>, std::error_code>
-  get(std::string_view key) override {
-    kvEntry *entry = nullptr;
-    const std::string key_str(key);
-    const natsStatus s = kvStore_Get(&entry, store_, key_str.c_str());
+  [[nodiscard]] std::shared_ptr<IKeyValueEntry>
+  get(std::string_view key, std::error_code &ec) override {
+    kvEntry *kv_entry = nullptr;
+    const std::string key_str{key};
+    const natsStatus s = kvStore_Get(&kv_entry, store_, key_str.c_str());
     if (s != NATS_OK) {
-      return {nullptr, make_nats_error(s)};
+      ec = make_nats_error(s);
+      return nullptr;
     }
-    if (entry == nullptr) {
-      return {nullptr, make_error_code(errc::not_found)};
+    if (kv_entry == nullptr) {
+      ec = make_error_code(errc::not_found);
+      return nullptr;
     }
-    return {std::make_shared<NatsKeyValueEntry>(entry), {}};
+    ec = {};
+    return std::make_shared<NatsKeyValueEntry>(kv_entry);
   }
 
-  [[nodiscard]] std::pair<std::unique_ptr<IKeyWatcher>, std::error_code>
-  watch(std::string_view key, std::stop_token /*stop_token*/
-        ) override {
+  [[nodiscard]] std::unique_ptr<IKeyWatcher>
+  watch(std::string_view key, std::error_code &ec,
+        std::chrono::milliseconds timeout = std::chrono::milliseconds{1000})
+      override {
     kvWatchOptions opts{};
     kvWatchOptions_Init(&opts);
     opts.IgnoreDeletes = true;
 
-    const std::string key_str(key);
-    kvWatcher *watcher = nullptr;
-    const natsStatus s =
-        kvStore_Watch(&watcher, store_, key_str.c_str(), &opts);
+    const std::string key_str{key};
+    kvWatcher *w = nullptr;
+    const natsStatus s = kvStore_Watch(&w, store_, key_str.c_str(), &opts);
     if (s != NATS_OK) {
-      return {nullptr, make_nats_error(s)};
+      ec = make_nats_error(s);
+      return nullptr;
     }
-    return {std::make_unique<NatsKeyWatcher>(watcher, key_str), {}};
+    ec = {};
+    return std::make_unique<NatsKeyWatcher>(w, key_str, timeout);
   }
 
   [[nodiscard]] std::string_view bucket() const override {

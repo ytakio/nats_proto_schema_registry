@@ -26,6 +26,9 @@
 #include <stop_token>
 #include <string>
 
+#define LOG_INFO(...) std::cout << std::format(__VA_ARGS__) << std::flush
+#define LOG_ERROR(...) std::cerr << std::format(__VA_ARGS__) << std::flush
+
 int main() {
     natsStatus s = NATS_OK;
     natsConnection* conn = nullptr;
@@ -33,38 +36,41 @@ int main() {
 
     s = natsConnection_ConnectTo(&conn, "nats://localhost:4444");
     if (s != NATS_OK) {
-        std::cerr << std::format("connect: {}\n", natsStatus_GetText(s));
+        LOG_ERROR("connect: {}\n", natsStatus_GetText(s));
         return EXIT_FAILURE;
     }
 
     s = natsConnection_JetStream(&js, conn, nullptr);
     if (s != NATS_OK) {
-        std::cerr << std::format("jetstream: {}\n", natsStatus_GetText(s));
+        LOG_ERROR("jetstream: {}\n", natsStatus_GetText(s));
         natsConnection_Destroy(conn);
         return EXIT_FAILURE;
     }
 
-    auto [reg, reg_err] = schemaregistry::create_registry(js, "metadata", "schemas");
+    std::error_code reg_err;
+    auto reg = schemaregistry::create_registry(js, "metadata", "schemas", reg_err);
     if (reg_err) {
-        std::cerr << std::format("registry: {}\n", reg_err.message());
+        LOG_ERROR("registry: {}\n", reg_err.message());
         jsCtx_Destroy(js);
         natsConnection_Destroy(conn);
         return EXIT_FAILURE;
     }
 
     const std::string subject = "orders.created";
-    auto [result, pull_err] = reg->pull({}, subject);
-    if (pull_err) {
-        std::cerr << std::format("pull: {}\n", pull_err.message());
+    schemaregistry::Metadata meta;
+    std::error_code pull_err;
+    auto fds = reg->pull({}, subject, meta, pull_err);
+    if (!fds) {
+        LOG_ERROR("pull: {}\n", pull_err.message());
         jsCtx_Destroy(js);
         natsConnection_Destroy(conn);
         return EXIT_FAILURE;
     }
 
-    std::cout << std::format("subject: {}\n", subject);
-    std::cout << std::format("schema path: {}\n", result.meta.schema.path);
-    std::cout << std::format("schema full name: {}\n", result.meta.schema.full_name);
-    std::cout << std::format("files in descriptor set: {}\n", result.fds.file_size());
+    LOG_INFO("subject: {}\n", subject);
+    LOG_INFO("schema path: {}\n", meta.schema.path);
+    LOG_INFO("schema full name: {}\n", meta.schema.full_name);
+    LOG_INFO("files in descriptor set: {}\n", fds->file_size());
 
     jsCtx_Destroy(js);
     natsConnection_Destroy(conn);

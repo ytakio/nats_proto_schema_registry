@@ -67,11 +67,13 @@ TEST(RegistryTest, PushAndPull) {
     auto push_err = reg.push({}, subject, msg);
     ASSERT_FALSE(push_err) << push_err.message();
 
-    auto [pull_value, pull_err] = reg.pull({}, subject);
-    ASSERT_FALSE(pull_err) << pull_err.message();
-    EXPECT_EQ(pull_value.meta.schema.full_name, "google.protobuf.StringValue");
-    EXPECT_EQ(pull_value.meta.schema.path, "google/protobuf/wrappers.proto");
-    EXPECT_GT(pull_value.fds.file_size(), 0);
+    Metadata meta;
+    std::error_code pull_err;
+    auto fds = reg.pull({}, subject, meta, pull_err);
+    ASSERT_TRUE(fds) << pull_err.message();
+    EXPECT_EQ(meta.schema.full_name, "google.protobuf.StringValue");
+    EXPECT_EQ(meta.schema.path, "google/protobuf/wrappers.proto");
+    EXPECT_GT(fds->file_size(), 0);
 }
 
 TEST(RegistryTest, PushAny) {
@@ -83,10 +85,12 @@ TEST(RegistryTest, PushAny) {
     auto push_err = reg.push({}, "events.any", google::protobuf::Any{});
     ASSERT_FALSE(push_err) << push_err.message();
 
-    auto [pull_value, pull_err] = reg.pull({}, "events.any");
-    ASSERT_FALSE(pull_err) << pull_err.message();
-    EXPECT_EQ(pull_value.meta.schema.full_name, "google.protobuf.Any");
-    EXPECT_EQ(pull_value.meta.schema.path, "google/protobuf/any.proto");
+    Metadata meta;
+    std::error_code pull_err;
+    auto fds = reg.pull({}, "events.any", meta, pull_err);
+    ASSERT_TRUE(fds) << pull_err.message();
+    EXPECT_EQ(meta.schema.full_name, "google.protobuf.Any");
+    EXPECT_EQ(meta.schema.path, "google/protobuf/any.proto");
 }
 
 TEST(RegistryTest, PullNotFound) {
@@ -96,8 +100,10 @@ TEST(RegistryTest, PullNotFound) {
     );
 
     TimeoutSource source(std::chrono::milliseconds(50));
-    auto [pull_value, pull_err] = reg.pull(source.get_token(), "unknown.subject");
-    EXPECT_TRUE(pull_err);
+    Metadata meta;
+    std::error_code pull_err;
+    auto fds = reg.pull(source.get_token(), "unknown.subject", meta, pull_err);
+    EXPECT_FALSE(fds);
     EXPECT_EQ(pull_err, make_error_code(errc::cancelled));
 }
 
@@ -112,14 +118,18 @@ TEST(RegistryTest, PullWaitsForPush) {
     msg.set_value("hello");
 
     struct Result {
-        std::optional<pull_result> value;
+        std::unique_ptr<google::protobuf::FileDescriptorSet> fds;
+        Metadata meta;
         std::error_code error;
     } result;
 
     std::jthread pull_thread([&reg, &subject, &result](std::stop_token token) {
-        auto [pull_value, pull_err] = reg.pull(token, subject);
+        Metadata meta;
+        std::error_code pull_err;
+        auto fds = reg.pull(token, subject, meta, pull_err);
         if (!pull_err) {
-            result.value.emplace(std::move(pull_value));
+            result.fds = std::move(fds);
+            result.meta = std::move(meta);
         } else {
             result.error = pull_err;
         }
@@ -131,9 +141,9 @@ TEST(RegistryTest, PullWaitsForPush) {
     pull_thread.join();
 
     ASSERT_FALSE(result.error) << result.error.message();
-    ASSERT_TRUE(result.value);
-    EXPECT_EQ(result.value->meta.schema.full_name, "google.protobuf.StringValue");
-    EXPECT_GT(result.value->fds.file_size(), 0);
+    EXPECT_EQ(result.meta.schema.full_name, "google.protobuf.StringValue");
+    ASSERT_TRUE(result.fds);
+    EXPECT_GT(result.fds->file_size(), 0);
 }
 
 TEST(RegistryTest, PushValidation) {
@@ -158,8 +168,10 @@ TEST(RegistryTest, PullCancellation) {
 
     std::stop_source source;
     source.request_stop();
-    auto [pull_value, pull_err] = reg.pull(source.get_token(), "cancelled.subject");
-    EXPECT_TRUE(pull_err);
+    Metadata meta;
+    std::error_code pull_err;
+    auto fds = reg.pull(source.get_token(), "cancelled.subject", meta, pull_err);
+    EXPECT_FALSE(fds);
     EXPECT_EQ(pull_err, make_error_code(errc::cancelled));
 }
 

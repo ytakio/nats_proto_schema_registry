@@ -32,6 +32,9 @@
 #include <string>
 #include <thread>
 
+#define LOG_INFO(...) std::cout << std::format(__VA_ARGS__) << std::flush
+#define LOG_ERROR(...) std::cerr << std::format(__VA_ARGS__) << std::flush
+
 namespace {
 
 std::atomic<bool> g_running{true};
@@ -68,20 +71,21 @@ int main(int argc, char **argv) {
 
   s = natsConnection_ConnectTo(&conn, url.c_str());
   if (s != NATS_OK) {
-    std::cerr << std::format("connect: {}\n", natsStatus_GetText(s));
+    LOG_ERROR("connect: {}\n", natsStatus_GetText(s));
     return EXIT_FAILURE;
   }
 
   s = natsConnection_JetStream(&js, conn, nullptr);
   if (s != NATS_OK) {
-    std::cerr << std::format("jetstream: {}\n", natsStatus_GetText(s));
+    LOG_ERROR("jetstream: {}\n", natsStatus_GetText(s));
     natsConnection_Destroy(conn);
     return EXIT_FAILURE;
   }
 
-  auto [reg, reg_err] = schemaregistry::create_registry(js, metadata_bucket, schema_bucket);
+  std::error_code reg_err;
+  auto reg = schemaregistry::create_registry(js, metadata_bucket, schema_bucket, reg_err);
   if (reg_err) {
-    std::cerr << std::format("registry: {}\n", reg_err.message());
+    LOG_ERROR("registry: {}\n", reg_err.message());
     jsCtx_Destroy(js);
     natsConnection_Destroy(conn);
     return EXIT_FAILURE;
@@ -92,12 +96,12 @@ int main(int argc, char **argv) {
   sensorpb::SensorReading placeholder;
   auto push_err = reg->push({}, subject, placeholder);
   if (push_err) {
-    std::cerr << std::format("push: {}\n", push_err.message());
+    LOG_ERROR("push: {}\n", push_err.message());
     jsCtx_Destroy(js);
     natsConnection_Destroy(conn);
     return EXIT_FAILURE;
   }
-  std::cout << std::format("registered schema for subject \"{}\"\n", subject);
+  LOG_INFO("registered schema for subject \"{}\"\n", subject);
 
   std::uint64_t seq = 0;
   while (g_running) {
@@ -120,22 +124,22 @@ int main(int argc, char **argv) {
 
     std::string data;
     if (!msg.SerializeToString(&data)) {
-      std::cerr << std::format("marshal failed\n");
+      LOG_ERROR("marshal failed\n");
       break;
     }
 
     s = natsConnection_Publish(conn, subject.c_str(), data.data(),
                                static_cast<int>(data.size()));
     if (s != NATS_OK) {
-      std::cerr << std::format("publish: {}\n", natsStatus_GetText(s));
+      LOG_ERROR("publish: {}\n", natsStatus_GetText(s));
       break;
     }
-    std::cout << std::format("published seq={}\n", seq);
+    LOG_INFO("published seq={}\n", seq);
 
     std::this_thread::sleep_for(std::chrono::seconds(1));
   }
 
-  std::cout << std::format("producer shutting down after {} messages\n", seq);
+  LOG_INFO("producer shutting down after {} messages\n", seq);
 
   jsCtx_Destroy(js);
   natsConnection_Destroy(conn);

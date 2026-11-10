@@ -46,12 +46,6 @@ struct Metadata {
   SchemaRef schema;
 };
 
-// Result returned by Registry::pull.
-struct pull_result {
-  google::protobuf::FileDescriptorSet fds;
-  Metadata meta;
-};
-
 } // namespace schemaregistry
 
 namespace glz {

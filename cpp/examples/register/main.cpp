@@ -28,6 +28,9 @@
 #include <stop_token>
 #include <string>
 
+#define LOG_INFO(...) std::cout << std::format(__VA_ARGS__) << std::flush
+#define LOG_ERROR(...) std::cerr << std::format(__VA_ARGS__) << std::flush
+
 int main() {
   natsStatus s = NATS_OK;
   natsConnection *conn = nullptr;
@@ -35,20 +38,21 @@ int main() {
 
   s = natsConnection_ConnectTo(&conn, "nats://localhost:4444");
   if (s != NATS_OK) {
-    std::cerr << std::format("connect: {}\n", natsStatus_GetText(s));
+    LOG_ERROR("connect: {}\n", natsStatus_GetText(s));
     return EXIT_FAILURE;
   }
 
   s = natsConnection_JetStream(&js, conn, nullptr);
   if (s != NATS_OK) {
-    std::cerr << std::format("jetstream: {}\n", natsStatus_GetText(s));
+    LOG_ERROR("jetstream: {}\n", natsStatus_GetText(s));
     natsConnection_Destroy(conn);
     return EXIT_FAILURE;
   }
 
-  auto [reg, reg_err] = schemaregistry::create_registry(js, "metadata", "schemas");
+  std::error_code reg_err;
+  auto reg = schemaregistry::create_registry(js, "metadata", "schemas", reg_err);
   if (reg_err) {
-    std::cerr << std::format("registry: {}\n", reg_err.message());
+    LOG_ERROR("registry: {}\n", reg_err.message());
     jsCtx_Destroy(js);
     natsConnection_Destroy(conn);
     return EXIT_FAILURE;
@@ -60,13 +64,13 @@ int main() {
 
   auto push_err = reg->push({}, subject, msg);
   if (push_err) {
-    std::cerr << std::format("push: {}\n", push_err.message());
+    LOG_ERROR("push: {}\n", push_err.message());
     jsCtx_Destroy(js);
     natsConnection_Destroy(conn);
     return EXIT_FAILURE;
   }
 
-  std::cout << std::format("pushed schema for subject \"{}\"\n", subject);
+  LOG_INFO("pushed schema for subject \"{}\"\n", subject);
 
   jsCtx_Destroy(js);
   natsConnection_Destroy(conn);

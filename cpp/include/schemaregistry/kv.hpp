@@ -22,6 +22,7 @@
 
 #include "schemaregistry/error.hpp"
 
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <memory>
@@ -30,7 +31,6 @@
 #include <string>
 #include <string_view>
 #include <system_error>
-#include <utility>
 
 namespace schemaregistry {
 
@@ -44,42 +44,63 @@ enum class KeyValueOperation {
 // IKeyValueEntry is a single entry returned from a KeyValue store.
 class IKeyValueEntry {
 public:
-    virtual ~IKeyValueEntry() = default;
+  virtual ~IKeyValueEntry() = default;
 
-    [[nodiscard]] virtual std::string_view key() const = 0;
-    [[nodiscard]] virtual std::span<const std::byte> value() const = 0;
-    [[nodiscard]] virtual std::uint64_t revision() const = 0;
-    [[nodiscard]] virtual KeyValueOperation operation() const = 0;
+  [[nodiscard]] virtual std::string_view key() const = 0;
+  [[nodiscard]] virtual std::span<const std::byte> value() const = 0;
+  [[nodiscard]] virtual std::uint64_t revision() const = 0;
+  [[nodiscard]] virtual KeyValueOperation operation() const = 0;
 };
 
 // IKeyWatcher watches a key in a KeyValue store.
 class IKeyWatcher {
 public:
-    virtual ~IKeyWatcher() = default;
+  virtual ~IKeyWatcher() = default;
 
-    // Returns an entry on a real update, nullptr on a timeout/initial marker,
-    // or an error if the watcher fails.
-    [[nodiscard]] virtual std::pair<std::shared_ptr<IKeyValueEntry>, std::error_code>
-    next(std::stop_token stop_token) = 0;
+  // Returns an entry on a real update, nullptr on a timeout/initial marker,
+  // or an error if the watcher fails.
+  [[nodiscard]] virtual std::shared_ptr<IKeyValueEntry>
+  next(std::stop_token stop_token, std::error_code &ec) = 0;
 
-    virtual void stop() = 0;
+  virtual void stop() = 0;
 };
 
 // IKeyValue is a minimal abstraction over a NATS KV bucket.
 class IKeyValue {
 public:
-    virtual ~IKeyValue() = default;
+  virtual ~IKeyValue() = default;
 
-    [[nodiscard]] virtual std::pair<std::uint64_t, std::error_code>
-    put(std::string_view key, std::span<const std::byte> value) = 0;
+  // Stores value under key. On success rev is set to the new revision.
+  [[nodiscard]] virtual std::error_code put(std::string_view key,
+                                            std::span<const std::byte> value,
+                                            std::uint64_t &rev) = 0;
 
-    [[nodiscard]] virtual std::pair<std::shared_ptr<IKeyValueEntry>, std::error_code>
-    get(std::string_view key) = 0;
+  // Convenience overload for callers that already hold a std::string
+  // (e.g. values produced by protobuf's SerializeToString).
+  // Kept virtual so implementations may override the conversion strategy.
+  [[nodiscard]] virtual std::error_code put(std::string_view key,
+                                            std::string_view value,
+                                            std::uint64_t &rev) {
+    return put(key,
+               std::span{reinterpret_cast<const std::byte *>(value.data()),
+                         value.size()},
+               rev);
+  }
 
-    [[nodiscard]] virtual std::pair<std::unique_ptr<IKeyWatcher>, std::error_code>
-    watch(std::string_view key, std::stop_token stop_token) = 0;
+  // Retrieves the entry for key. Returns nullptr and sets ec on failure.
+  [[nodiscard]] virtual std::shared_ptr<IKeyValueEntry>
+  get(std::string_view key, std::error_code &ec) = 0;
 
-    [[nodiscard]] virtual std::string_view bucket() const = 0;
+  // Create a watcher for the given key. The watcher yields the current value
+  // on the first call to next() and then reports subsequent updates until
+  // stop() is called. The timeout hint is backend-specific; the default is
+  // chosen to avoid blocking forever while still allowing long poll behavior.
+  // Returns nullptr and sets ec on failure.
+  [[nodiscard]] virtual std::unique_ptr<IKeyWatcher>
+  watch(std::string_view key, std::error_code &ec,
+        std::chrono::milliseconds timeout = std::chrono::milliseconds{1000}) = 0;
+
+  [[nodiscard]] virtual std::string_view bucket() const = 0;
 };
 
 } // namespace schemaregistry

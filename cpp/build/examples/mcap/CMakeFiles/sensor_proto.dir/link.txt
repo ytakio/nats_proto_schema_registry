@@ -1,2 +1,0 @@
-/usr/bin/ar qc libsensor_proto.a CMakeFiles/sensor_proto.dir/generated/sensor.pb.cc.o
-/usr/bin/ranlib libsensor_proto.a

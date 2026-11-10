@@ -33,6 +33,9 @@
 #include <string>
 #include <thread>
 
+#define LOG_INFO(...) std::cout << std::format(__VA_ARGS__) << std::flush
+#define LOG_ERROR(...) std::cerr << std::format(__VA_ARGS__) << std::flush
+
 namespace {
 
 std::atomic<bool> g_running{true};
@@ -72,20 +75,21 @@ int main(int argc, char **argv) {
 
   s = natsConnection_ConnectTo(&conn, url.c_str());
   if (s != NATS_OK) {
-    std::cerr << std::format("connect: {}\n", natsStatus_GetText(s));
+    LOG_ERROR("connect: {}\n", natsStatus_GetText(s));
     return EXIT_FAILURE;
   }
 
   s = natsConnection_JetStream(&js, conn, nullptr);
   if (s != NATS_OK) {
-    std::cerr << std::format("jetstream: {}\n", natsStatus_GetText(s));
+    LOG_ERROR("jetstream: {}\n", natsStatus_GetText(s));
     natsConnection_Destroy(conn);
     return EXIT_FAILURE;
   }
 
-  auto [reg, reg_err] = schemaregistry::create_registry(js, metadata_bucket, schema_bucket);
+  std::error_code reg_err;
+  auto reg = schemaregistry::create_registry(js, metadata_bucket, schema_bucket, reg_err);
   if (reg_err) {
-    std::cerr << std::format("registry: {}\n", reg_err.message());
+    LOG_ERROR("registry: {}\n", reg_err.message());
     jsCtx_Destroy(js);
     natsConnection_Destroy(conn);
     return EXIT_FAILURE;
@@ -96,32 +100,33 @@ int main(int argc, char **argv) {
   natsSubscription *sub = nullptr;
   s = natsConnection_Subscribe(&sub, conn, subject.c_str(), nullptr, nullptr);
   if (s != NATS_OK) {
-    std::cerr << std::format("subscribe: {}\n", natsStatus_GetText(s));
+    LOG_ERROR("subscribe: {}\n", natsStatus_GetText(s));
     jsCtx_Destroy(js);
     natsConnection_Destroy(conn);
     return EXIT_FAILURE;
   }
-  std::cout << std::format(
-      "recorder subscribed to \"{}\", waiting for schema...\n", subject);
+  LOG_INFO("recorder subscribed to \"{}\", waiting for schema...\n", subject);
 
   // Pull blocks until the producer registers the schema.
-  auto [result, pull_err] = reg->pull({}, subject);
+  schemaregistry::Metadata meta;
+  std::error_code pull_err;
+  auto fds = reg->pull({}, subject, meta, pull_err);
   if (pull_err) {
-    std::cerr << std::format("pull schema: {}\n", pull_err.message());
+    LOG_ERROR("pull schema: {}\n", pull_err.message());
     natsSubscription_Destroy(sub);
     jsCtx_Destroy(js);
     natsConnection_Destroy(conn);
     return EXIT_FAILURE;
   }
 
-  std::cout << std::format("resolved schema {} ({})\n",
-                           result.meta.schema.full_name,
-                           result.meta.schema.path);
+  LOG_INFO("resolved schema {} ({})\n",
+           meta.schema.full_name,
+           meta.schema.path);
 
   // Open the MCAP file and register the schema/channel.
   std::ofstream out(output, std::ios::binary);
   if (!out) {
-    std::cerr << std::format("create output file: {}\n", output);
+    LOG_ERROR("create output file: {}\n", output);
     natsSubscription_Destroy(sub);
     jsCtx_Destroy(js);
     natsConnection_Destroy(conn);
@@ -134,8 +139,8 @@ int main(int argc, char **argv) {
   writer.open(out, options);
 
   std::string schema_data;
-  if (!result.fds.SerializeToString(&schema_data)) {
-    std::cerr << std::format("marshal schema\n");
+  if (!fds->SerializeToString(&schema_data)) {
+    LOG_ERROR("marshal schema\n");
     writer.close();
     natsSubscription_Destroy(sub);
     jsCtx_Destroy(js);
@@ -145,7 +150,7 @@ int main(int argc, char **argv) {
 
   mcap::Schema schema;
   schema.id = 1;
-  schema.name = result.meta.schema.full_name;
+  schema.name = meta.schema.full_name;
   schema.encoding = "protobuf";
   schema.data =
       mcap::ByteArray(reinterpret_cast<const std::byte *>(schema_data.data()),
@@ -168,7 +173,7 @@ int main(int argc, char **argv) {
       continue;
     }
     if (s != NATS_OK) {
-      std::cerr << std::format("next msg: {}\n", natsStatus_GetText(s));
+      LOG_ERROR("next msg: {}\n", natsStatus_GetText(s));
       break;
     }
 
@@ -193,19 +198,18 @@ int main(int argc, char **argv) {
 
     auto status = writer.write(mcap_msg);
     if (!status.ok()) {
-      std::cerr << std::format("mcap write: {}\n", status.message);
+      LOG_ERROR("mcap write: {}\n", status.message);
       natsMsg_Destroy(msg);
       break;
     }
     natsMsg_Destroy(msg);
 
-    std::cout << std::format("recorded seq={}\n", received);
+    LOG_INFO("recorded seq={}\n", received);
   }
 
   writer.close();
   natsSubscription_Destroy(sub);
-  std::cout <<
-      std::format("shutdown signal received, wrote {} messages\n", received);
+  LOG_INFO("shutdown signal received, wrote {} messages\n", received);
 
   jsCtx_Destroy(js);
   natsConnection_Destroy(conn);
