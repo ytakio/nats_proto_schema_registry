@@ -7,8 +7,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -20,29 +20,31 @@
 
 #pragma once
 
+#include "schemaregistry/error.hpp"
+
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <optional>
 #include <span>
 #include <stop_token>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <utility>
 
 namespace schemaregistry {
 
 enum class KeyValueOperation {
-    unknown,
-    put,
-    del,
-    purge,
+  unknown,
+  put,
+  del,
+  purge,
 };
 
-// KeyValueEntry is a single entry returned from a KeyValue store.
-class KeyValueEntry {
+// IKeyValueEntry is a single entry returned from a KeyValue store.
+class IKeyValueEntry {
 public:
-    virtual ~KeyValueEntry() = default;
+    virtual ~IKeyValueEntry() = default;
 
     [[nodiscard]] virtual std::string_view key() const = 0;
     [[nodiscard]] virtual std::span<const std::byte> value() const = 0;
@@ -50,45 +52,34 @@ public:
     [[nodiscard]] virtual KeyValueOperation operation() const = 0;
 };
 
-// KeyWatcher watches a key in a KeyValue store.
-class KeyWatcher {
+// IKeyWatcher watches a key in a KeyValue store.
+class IKeyWatcher {
 public:
-    virtual ~KeyWatcher() = default;
+    virtual ~IKeyWatcher() = default;
 
-    // Returns the next entry for this watcher, or std::nullopt if the watcher
-    // was stopped or cancellation was requested. A returned shared_ptr may be
-    // nullptr to indicate an initial-state marker.
-    [[nodiscard]] virtual std::optional<std::shared_ptr<KeyValueEntry>> next(
-        std::stop_token stop_token
-    ) = 0;
+    // Returns an entry on a real update, nullptr on a timeout/initial marker,
+    // or an error if the watcher fails.
+    [[nodiscard]] virtual std::pair<std::shared_ptr<IKeyValueEntry>, std::error_code>
+    next(std::stop_token stop_token) = 0;
 
     virtual void stop() = 0;
 };
 
-// KeyValue is a minimal abstraction over a NATS KV bucket.
-class KeyValue {
+// IKeyValue is a minimal abstraction over a NATS KV bucket.
+class IKeyValue {
 public:
-    virtual ~KeyValue() = default;
+    virtual ~IKeyValue() = default;
 
-    [[nodiscard]] virtual std::uint64_t put(
-        std::string_view key,
-        std::span<const std::byte> value,
-        std::error_code& ec
-    ) = 0;
+    [[nodiscard]] virtual std::pair<std::uint64_t, std::error_code>
+    put(std::string_view key, std::span<const std::byte> value) = 0;
 
-    [[nodiscard]] virtual std::shared_ptr<KeyValueEntry> get(
-        std::string_view key,
-        std::error_code& ec
-    ) = 0;
+    [[nodiscard]] virtual std::pair<std::shared_ptr<IKeyValueEntry>, std::error_code>
+    get(std::string_view key) = 0;
 
-    [[nodiscard]] virtual std::unique_ptr<KeyWatcher> watch(
-        std::string_view key,
-        std::stop_token stop_token,
-        std::error_code& ec
-    ) = 0;
+    [[nodiscard]] virtual std::pair<std::unique_ptr<IKeyWatcher>, std::error_code>
+    watch(std::string_view key, std::stop_token stop_token) = 0;
 
     [[nodiscard]] virtual std::string_view bucket() const = 0;
 };
 
 } // namespace schemaregistry
-

@@ -7,8 +7,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -33,45 +33,38 @@ namespace schemaregistry {
 // defines it. It is stored as JSON in the metadata bucket keyed by the NATS
 // subject.
 struct SchemaRef {
-    // Path is the .proto file path, for example "google/protobuf/any.proto".
-    std::string path;
+  // Path is the .proto file path, for example "google/protobuf/any.proto".
+  std::string path;
 
-    // FullName is the fully qualified protobuf message name, for example
-    // "google.protobuf.Any".
-    std::string full_name;
+  // FullName is the fully qualified protobuf message name, for example
+  // "google.protobuf.Any".
+  std::string full_name;
 };
 
 // Metadata is the JSON document stored per subject in the metadata bucket.
 struct Metadata {
-    SchemaRef schema;
+  SchemaRef schema;
 };
 
 // Result returned by Registry::pull.
 struct pull_result {
-    google::protobuf::FileDescriptorSet fds;
-    Metadata meta;
+  google::protobuf::FileDescriptorSet fds;
+  Metadata meta;
 };
 
 } // namespace schemaregistry
 
 namespace glz {
 
-template <>
-struct meta<schemaregistry::SchemaRef> {
-    using T = schemaregistry::SchemaRef;
-    static constexpr auto value = object(
-        "path", &T::path,
-        "full_name", &T::full_name
-    );
+template <> struct meta<schemaregistry::SchemaRef> {
+  using T = schemaregistry::SchemaRef;
+  static constexpr auto value =
+      object("path", &T::path, "full_name", &T::full_name);
 };
 
-template <>
-struct meta<schemaregistry::Metadata> {
-    using T = schemaregistry::Metadata;
-    static constexpr auto value = object(
-        "schema", &T::schema
-    );
+template <> struct meta<schemaregistry::Metadata> {
+  using T = schemaregistry::Metadata;
+  static constexpr auto value = object("schema", &T::schema);
 };
 
 } // namespace glz
-

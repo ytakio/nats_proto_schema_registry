@@ -90,32 +90,50 @@ natsConnection_ConnectTo(&conn, "nats://localhost:4444");
 jsCtx* js = nullptr;
 natsConnection_JetStream(&js, conn, nullptr);
 
-auto reg = schemaregistry::create_registry(js, "metadata", "schemas");
+auto [reg, reg_err] = schemaregistry::create_registry(js, "metadata", "schemas");
+if (reg_err) {
+    std::cerr << "registry: " << reg_err.message() << std::endl;
+    return EXIT_FAILURE;
+}
+
 google::protobuf::StringValue msg;
 msg.set_value("order-123");
-reg->push({}, "orders.created", msg);
+if (auto push_err = reg->push({}, "orders.created", msg); push_err) {
+    std::cerr << "push: " << push_err.message() << std::endl;
+    return EXIT_FAILURE;
+}
 ```
 
 ### Look up a schema
 
 ```cpp
-auto [fds, meta] = reg->pull({}, "orders.created");
-std::cout << meta.schema.path << std::endl;
+auto [result, pull_err] = reg->pull({}, "orders.created");
+if (pull_err) {
+    std::cerr << "pull: " << pull_err.message() << std::endl;
+    return EXIT_FAILURE;
+}
+std::cout << result.meta.schema.path << std::endl;
 // google/protobuf/wrappers.proto
-std::cout << meta.schema.full_name << std::endl;
+std::cout << result.meta.schema.full_name << std::endl;
 // google.protobuf.StringValue
-std::cout << fds.file_size() << std::endl; // count of files
-                                           // in descriptor set
+std::cout << result.fds.file_size() << std::endl; // count of files
+                                                  // in descriptor set
 ```
 
 ## API
 
-The main entry point is the `Registry` interface in `registry.hpp`:
+The main entry point is the `NatsRegistry` class in `registry.hpp`:
 
 - `push(stop_token, subject, msg)` - register a generated protobuf message.
+  Returns `std::error_code` directly because there is no value payload,
+  mirroring Go's `error` return idiom.
 - `pull(stop_token, subject)` - retrieve the `FileDescriptorSet` and
-  `Metadata`. `pull` watches the metadata and schema buckets, so it blocks until
-  the requested subject is registered or cancellation is requested.
+  `Metadata` as `std::pair<pull_result, std::error_code>`. `pull` watches the
+  metadata and schema buckets, so it blocks until the requested subject is
+  registered or cancellation is requested.
+
+Errors are reported through `std::error_code`. Use structured bindings or check
+`.second` to access the error code.
 
 Cancellation is expressed with `std::stop_token`. For timeouts, create a
 `std::stop_source` and request stop after the desired duration.

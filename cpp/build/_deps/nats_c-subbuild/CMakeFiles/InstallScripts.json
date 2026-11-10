@@ -1,0 +1,7 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/t-yamaoka/work/nats/nats_proto_schema_registry/cpp/build/_deps/nats_c-subbuild/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

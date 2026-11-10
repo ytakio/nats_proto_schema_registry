@@ -1,0 +1,2 @@
+# Hashes of file build rules.
+89a46e346d1e1e481166a86ba07fe596 examples/mcap/generated/sensor.pb.cc

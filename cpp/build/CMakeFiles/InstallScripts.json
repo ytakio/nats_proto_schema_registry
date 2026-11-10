@@ -1,0 +1,21 @@
+{
+	"InstallScripts" : 
+	[
+		"/Users/t-yamaoka/work/nats/nats_proto_schema_registry/cpp/build/cmake_install.cmake",
+		"/Users/t-yamaoka/work/nats/nats_proto_schema_registry/cpp/build/_deps/nats_c-build/cmake_install.cmake",
+		"/Users/t-yamaoka/work/nats/nats_proto_schema_registry/cpp/build/_deps/nats_c-build/src/cmake_install.cmake",
+		"/Users/t-yamaoka/work/nats/nats_proto_schema_registry/cpp/build/_deps/nats_c-build/examples/cmake_install.cmake",
+		"/Users/t-yamaoka/work/nats/nats_proto_schema_registry/cpp/build/_deps/nats_c-build/examples/getstarted/cmake_install.cmake",
+		"/Users/t-yamaoka/work/nats/nats_proto_schema_registry/cpp/build/_deps/nats_c-build/examples/docs/cmake_install.cmake",
+		"/Users/t-yamaoka/work/nats/nats_proto_schema_registry/cpp/build/_deps/nats_c-build/test/cmake_install.cmake",
+		"/Users/t-yamaoka/work/nats/nats_proto_schema_registry/cpp/build/_deps/nats_c-build/test/dylib/cmake_install.cmake",
+		"/Users/t-yamaoka/work/nats/nats_proto_schema_registry/cpp/build/_deps/nats_c-build/test/check_cpp/cmake_install.cmake",
+		"/Users/t-yamaoka/work/nats/nats_proto_schema_registry/cpp/build/_deps/nats_c-build/test/no_crash_on_exit/cmake_install.cmake",
+		"/Users/t-yamaoka/work/nats/nats_proto_schema_registry/cpp/build/_deps/glaze-build/cmake_install.cmake",
+		"/Users/t-yamaoka/work/nats/nats_proto_schema_registry/cpp/build/tests/cmake_install.cmake",
+		"/Users/t-yamaoka/work/nats/nats_proto_schema_registry/cpp/build/examples/register/cmake_install.cmake",
+		"/Users/t-yamaoka/work/nats/nats_proto_schema_registry/cpp/build/examples/lookup/cmake_install.cmake",
+		"/Users/t-yamaoka/work/nats/nats_proto_schema_registry/cpp/build/examples/mcap/cmake_install.cmake"
+	],
+	"Parallel" : false
+}

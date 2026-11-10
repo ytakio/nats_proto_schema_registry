@@ -20,7 +20,8 @@
 
 #pragma once
 
-#include "schemaregistry/registry.hpp"
+#include "schemaregistry/error.hpp"
+#include "schemaregistry/kv.hpp"
 
 #include <algorithm>
 #include <condition_variable>
@@ -41,7 +42,7 @@
 
 namespace schemaregistry::testing {
 
-class MockKeyValueEntry : public KeyValueEntry {
+class MockKeyValueEntry : public IKeyValueEntry {
 public:
     MockKeyValueEntry(
         std::string key,
@@ -63,7 +64,7 @@ private:
     KeyValueOperation operation_;
 };
 
-class MockKeyWatcher : public KeyWatcher {
+class MockKeyWatcher : public IKeyWatcher {
 public:
     MockKeyWatcher(
         std::string key,
@@ -98,7 +99,8 @@ public:
     MockKeyWatcher(const MockKeyWatcher&) = delete;
     MockKeyWatcher& operator=(const MockKeyWatcher&) = delete;
 
-    std::optional<std::shared_ptr<KeyValueEntry>> next(
+    [[nodiscard]] std::pair<std::shared_ptr<IKeyValueEntry>, std::error_code>
+    next(
         std::stop_token stop_token
     ) override {
         std::unique_lock<std::mutex> lock(mutex_);
@@ -112,12 +114,12 @@ public:
         }
 
         if (cancelled_) {
-            return std::nullopt;
+            return {nullptr, make_error_code(errc::cancelled)};
         }
 
         auto entry = std::move(queue_.front());
         queue_.pop();
-        return entry;
+        return {entry, {}};
     }
 
     void stop() override {
@@ -135,7 +137,7 @@ public:
         }
     }
 
-    void notify(std::shared_ptr<KeyValueEntry> entry) {
+    void notify(std::shared_ptr<IKeyValueEntry> entry) {
         {
             std::lock_guard<std::mutex> lock(mutex_);
             if (cancelled_) {
@@ -162,19 +164,19 @@ private:
     std::mutex mutex_;
     std::condition_variable cv_;
     bool cancelled_ = false;
-    std::queue<std::shared_ptr<KeyValueEntry>> queue_;
+    std::queue<std::shared_ptr<IKeyValueEntry>> queue_;
 };
 
-class MockKeyValue : public KeyValue {
+class MockKeyValue : public IKeyValue {
 public:
     MockKeyValue() = default;
 
-    std::uint64_t put(
+    [[nodiscard]] std::pair<std::uint64_t, std::error_code>
+    put(
         std::string_view key,
-        std::span<const std::byte> value,
-        std::error_code& /*ec*/
+        std::span<const std::byte> value
     ) override {
-        std::shared_ptr<KeyValueEntry> entry;
+        std::shared_ptr<IKeyValueEntry> entry;
         std::vector<MockKeyWatcher*> watchers_copy;
         {
             std::lock_guard<std::mutex> lock(mutex_);
@@ -194,32 +196,32 @@ public:
         for (auto* watcher : watchers_copy) {
             watcher->notify(entry);
         }
-        return 1;
+        return {std::uint64_t{1}, {}};
     }
 
-    std::shared_ptr<KeyValueEntry> get(
-        std::string_view key,
-        std::error_code& /*ec*/
+    [[nodiscard]] std::pair<std::shared_ptr<IKeyValueEntry>, std::error_code>
+    get(
+        std::string_view key
     ) override {
         std::lock_guard<std::mutex> lock(mutex_);
         auto it = data_.find(std::string(key));
         if (it == data_.end()) {
-            return nullptr;
+            return {nullptr, make_error_code(errc::not_found)};
         }
-        return std::make_shared<MockKeyValueEntry>(std::string(key), it->second);
+        return {std::make_shared<MockKeyValueEntry>(std::string(key), it->second), {}};
     }
 
-    std::unique_ptr<KeyWatcher> watch(
+    [[nodiscard]] std::pair<std::unique_ptr<IKeyWatcher>, std::error_code>
+    watch(
         std::string_view key,
-        std::stop_token /*stop_token*/,
-        std::error_code& /*ec*/
+        std::stop_token /*stop_token*/
     ) override {
-        return std::make_unique<MockKeyWatcher>(
+        return {std::make_unique<MockKeyWatcher>(
             std::string(key),
             data_,
             mutex_,
             watchers_
-        );
+        ), {}};
     }
 
     [[nodiscard]] std::string_view bucket() const override { return "mock"; }

@@ -1,0 +1,14 @@
+# Target labels
+ nats_c-populate
+# Source files and their labels
+/Users/t-yamaoka/work/nats/nats_proto_schema_registry/cpp/build/_deps/nats_c-subbuild/CMakeFiles/nats_c-populate
+/Users/t-yamaoka/work/nats/nats_proto_schema_registry/cpp/build/_deps/nats_c-subbuild/CMakeFiles/nats_c-populate.rule
+/Users/t-yamaoka/work/nats/nats_proto_schema_registry/cpp/build/_deps/nats_c-subbuild/CMakeFiles/nats_c-populate-complete.rule
+/Users/t-yamaoka/work/nats/nats_proto_schema_registry/cpp/build/_deps/nats_c-subbuild/nats_c-populate-prefix/src/nats_c-populate-stamp/nats_c-populate-build.rule
+/Users/t-yamaoka/work/nats/nats_proto_schema_registry/cpp/build/_deps/nats_c-subbuild/nats_c-populate-prefix/src/nats_c-populate-stamp/nats_c-populate-configure.rule
+/Users/t-yamaoka/work/nats/nats_proto_schema_registry/cpp/build/_deps/nats_c-subbuild/nats_c-populate-prefix/src/nats_c-populate-stamp/nats_c-populate-download.rule
+/Users/t-yamaoka/work/nats/nats_proto_schema_registry/cpp/build/_deps/nats_c-subbuild/nats_c-populate-prefix/src/nats_c-populate-stamp/nats_c-populate-install.rule
+/Users/t-yamaoka/work/nats/nats_proto_schema_registry/cpp/build/_deps/nats_c-subbuild/nats_c-populate-prefix/src/nats_c-populate-stamp/nats_c-populate-mkdir.rule
+/Users/t-yamaoka/work/nats/nats_proto_schema_registry/cpp/build/_deps/nats_c-subbuild/nats_c-populate-prefix/src/nats_c-populate-stamp/nats_c-populate-patch.rule
+/Users/t-yamaoka/work/nats/nats_proto_schema_registry/cpp/build/_deps/nats_c-subbuild/nats_c-populate-prefix/src/nats_c-populate-stamp/nats_c-populate-test.rule
+/Users/t-yamaoka/work/nats/nats_proto_schema_registry/cpp/build/_deps/nats_c-subbuild/nats_c-populate-prefix/src/nats_c-populate-stamp/nats_c-populate-update.rule
