@@ -9,7 +9,6 @@ services:
       - "8222"
     ports:
       - "4444:4222"
-      - "8888:8222"
     volumes:
       - nats-jetstream-data:/data/jetstream
 

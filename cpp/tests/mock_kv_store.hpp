@@ -44,24 +44,21 @@ namespace schemaregistry::testing {
 
 class MockKeyValueEntry : public IKeyValueEntry {
 public:
-    MockKeyValueEntry(
-        std::string key,
-        std::vector<std::byte> value,
-        Operation op = Operation::put
-    )
-        : key_(std::move(key))
-        , value_(std::move(value))
-        , operation_(op) {}
+  MockKeyValueEntry(std::string key, std::vector<std::byte> value,
+                    IKeyValueEntry::Operation op = IKeyValueEntry::Operation::put)
+      : key_(std::move(key)), value_(std::move(value)), operation_(op) {}
 
-    [[nodiscard]] std::string_view key() const override { return key_; }
-    [[nodiscard]] std::span<const std::byte> value() const override { return value_; }
-    [[nodiscard]] std::uint64_t revision() const override { return 1; }
-    [[nodiscard]] Operation operation() const override { return operation_; }
+  [[nodiscard]] std::string_view key() const override { return key_; }
+  [[nodiscard]] std::span<const std::byte> value() const override {
+    return value_;
+  }
+  [[nodiscard]] std::uint64_t revision() const override { return 1; }
+  [[nodiscard]] IKeyValueEntry::Operation operation() const override { return operation_; }
 
 private:
-    std::string key_;
-    std::vector<std::byte> value_;
-    Operation operation_;
+  std::string key_;
+  std::vector<std::byte> value_;
+  IKeyValueEntry::Operation operation_;
 };
 
 class MockKeyWatcher : public IKeyWatcher {
@@ -137,7 +134,7 @@ public:
     }
 
     void notify(std::string_view key, std::span<const std::byte> value,
-                Operation op = Operation::put) {
+                IKeyValueEntry::Operation op = IKeyValueEntry::Operation::put) {
         {
             std::lock_guard<std::mutex> lock(mutex_);
             if (cancelled_) {
@@ -151,12 +148,12 @@ public:
 
     void notify_delete(std::string_view key) {
         std::vector<std::byte> empty;
-        notify(key, empty, Operation::del);
+        notify(key, empty, IKeyValueEntry::Operation::del);
     }
 
     void notify_purge(std::string_view key) {
         std::vector<std::byte> empty;
-        notify(key, empty, Operation::purge);
+        notify(key, empty, IKeyValueEntry::Operation::purge);
     }
 
 private:

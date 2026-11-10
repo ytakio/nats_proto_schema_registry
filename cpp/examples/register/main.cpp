@@ -59,8 +59,9 @@ int main() {
   }
 
   const std::string subject = "orders.created";
+  // push() introspects the descriptor from the message instance, so the
+  // actual field values do not matter.
   google::protobuf::StringValue msg;
-  msg.set_value("order-123");
 
   auto push_err = reg->push({}, subject, msg);
   if (push_err) {

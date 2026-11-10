@@ -30,50 +30,50 @@
 #define LOG_ERROR(...) std::cerr << std::format(__VA_ARGS__) << std::flush
 
 int main() {
-    natsStatus s = NATS_OK;
-    natsConnection* conn = nullptr;
-    jsCtx* js = nullptr;
+  natsStatus s = NATS_OK;
+  natsConnection *conn = nullptr;
+  jsCtx *js = nullptr;
 
-    s = natsConnection_ConnectTo(&conn, "nats://localhost:4444");
-    if (s != NATS_OK) {
-        LOG_ERROR("connect: {}\n", natsStatus_GetText(s));
-        return EXIT_FAILURE;
-    }
+  s = natsConnection_ConnectTo(&conn, "nats://localhost:4444");
+  if (s != NATS_OK) {
+    LOG_ERROR("connect: {}\n", natsStatus_GetText(s));
+    return EXIT_FAILURE;
+  }
 
-    s = natsConnection_JetStream(&js, conn, nullptr);
-    if (s != NATS_OK) {
-        LOG_ERROR("jetstream: {}\n", natsStatus_GetText(s));
-        natsConnection_Destroy(conn);
-        return EXIT_FAILURE;
-    }
+  s = natsConnection_JetStream(&js, conn, nullptr);
+  if (s != NATS_OK) {
+    LOG_ERROR("jetstream: {}\n", natsStatus_GetText(s));
+    natsConnection_Destroy(conn);
+    return EXIT_FAILURE;
+  }
 
-    std::error_code reg_err;
-    auto reg = schemaregistry::create_registry(js, "metadata", "schemas", reg_err);
-    if (reg_err) {
-        LOG_ERROR("registry: {}\n", reg_err.message());
-        jsCtx_Destroy(js);
-        natsConnection_Destroy(conn);
-        return EXIT_FAILURE;
-    }
-
-    const std::string subject = "orders.created";
-    schemaregistry::Metadata meta;
-    std::error_code pull_err;
-    auto fds = reg->pull({}, subject, meta, pull_err);
-    if (!fds) {
-        LOG_ERROR("pull: {}\n", pull_err.message());
-        jsCtx_Destroy(js);
-        natsConnection_Destroy(conn);
-        return EXIT_FAILURE;
-    }
-
-    LOG_INFO("subject: {}\n", subject);
-    LOG_INFO("schema path: {}\n", meta.schema.path);
-    LOG_INFO("schema full name: {}\n", meta.schema.full_name);
-    LOG_INFO("files in descriptor set: {}\n", fds->file_size());
-
+  std::error_code reg_err;
+  auto reg = schemaregistry::create_registry(js, "metadata", "schemas", reg_err);
+  if (reg_err) {
+    LOG_ERROR("registry: {}\n", reg_err.message());
     jsCtx_Destroy(js);
     natsConnection_Destroy(conn);
-    return EXIT_SUCCESS;
+    return EXIT_FAILURE;
+  }
+
+  const std::string subject = "orders.created";
+  schemaregistry::Metadata meta;
+  std::error_code pull_err;
+  auto fds = reg->pull({}, subject, meta, pull_err);
+  if (pull_err) {
+    LOG_ERROR("pull: {}\n", pull_err.message());
+    jsCtx_Destroy(js);
+    natsConnection_Destroy(conn);
+    return EXIT_FAILURE;
+  }
+
+  LOG_INFO("subject: {}\n", subject);
+  LOG_INFO("schema path: {}\n", meta.schema.path);
+  LOG_INFO("schema full name: {}\n", meta.schema.full_name);
+  LOG_INFO("files in descriptor set: {}\n", fds->file_size());
+
+  jsCtx_Destroy(js);
+  natsConnection_Destroy(conn);
+  return EXIT_SUCCESS;
 }
 

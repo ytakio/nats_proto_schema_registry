@@ -41,25 +41,52 @@ std::atomic<bool> g_running{true};
 
 void signal_handler(int) { g_running = false; }
 
-} // namespace
+void print_usage(std::string_view program) {
+  std::cerr << "usage: " << program << " [options]\n"
+            << "options:\n"
+            << "  --url <url>               NATS URL (default: nats://localhost:4444)\n"
+            << "  --subject <subject>       NATS subject (default: sensor.readings)\n"
+            << "  --metadata-bucket <name>  metadata KV bucket (default: metadata)\n"
+            << "  --schema-bucket <name>    schema KV bucket (default: schemas)\n"
+            << "  -h, --help                show this help message\n";
+}
 
-int main(int argc, char **argv) {
+struct Options {
   std::string url = "nats://localhost:4444";
   std::string subject = "sensor.readings";
   std::string metadata_bucket = "metadata";
   std::string schema_bucket = "schemas";
+};
 
+[[nodiscard]] bool parse_args(int argc, char **argv, Options &opts) {
   for (int i = 1; i < argc; ++i) {
     std::string arg = argv[i];
     if (arg == "--url" && i + 1 < argc) {
-      url = argv[++i];
+      opts.url = argv[++i];
     } else if (arg == "--subject" && i + 1 < argc) {
-      subject = argv[++i];
+      opts.subject = argv[++i];
     } else if (arg == "--metadata-bucket" && i + 1 < argc) {
-      metadata_bucket = argv[++i];
+      opts.metadata_bucket = argv[++i];
     } else if (arg == "--schema-bucket" && i + 1 < argc) {
-      schema_bucket = argv[++i];
+      opts.schema_bucket = argv[++i];
+    } else if (arg == "-h" || arg == "--help") {
+      print_usage(argv[0]);
+      std::exit(EXIT_SUCCESS);
+    } else {
+      std::cerr << "unknown argument: " << arg << std::endl;
+      print_usage(argv[0]);
+      return false;
     }
+  }
+  return true;
+}
+
+} // namespace
+
+int main(int argc, char **argv) {
+  Options opts;
+  if (!parse_args(argc, argv, opts)) {
+    return EXIT_FAILURE;
   }
 
   std::signal(SIGINT, signal_handler);
@@ -69,7 +96,7 @@ int main(int argc, char **argv) {
   natsConnection *conn = nullptr;
   jsCtx *js = nullptr;
 
-  s = natsConnection_ConnectTo(&conn, url.c_str());
+  s = natsConnection_ConnectTo(&conn, opts.url.c_str());
   if (s != NATS_OK) {
     LOG_ERROR("connect: {}\n", natsStatus_GetText(s));
     return EXIT_FAILURE;
@@ -83,7 +110,8 @@ int main(int argc, char **argv) {
   }
 
   std::error_code reg_err;
-  auto reg = schemaregistry::create_registry(js, metadata_bucket, schema_bucket, reg_err);
+  auto reg = schemaregistry::create_registry(js, opts.metadata_bucket,
+                                             opts.schema_bucket, reg_err);
   if (reg_err) {
     LOG_ERROR("registry: {}\n", reg_err.message());
     jsCtx_Destroy(js);
@@ -94,14 +122,14 @@ int main(int argc, char **argv) {
   // Register the schema for the subject. This unblocks the recorder which
   // is waiting for the schema via pull().
   sensorpb::SensorReading placeholder;
-  auto push_err = reg->push({}, subject, placeholder);
+  auto push_err = reg->push({}, opts.subject, placeholder);
   if (push_err) {
     LOG_ERROR("push: {}\n", push_err.message());
     jsCtx_Destroy(js);
     natsConnection_Destroy(conn);
     return EXIT_FAILURE;
   }
-  LOG_INFO("registered schema for subject \"{}\"\n", subject);
+  LOG_INFO("registered schema for subject \"{}\"\n", opts.subject);
 
   std::uint64_t seq = 0;
   while (g_running) {
@@ -128,7 +156,7 @@ int main(int argc, char **argv) {
       break;
     }
 
-    s = natsConnection_Publish(conn, subject.c_str(), data.data(),
+    s = natsConnection_Publish(conn, opts.subject.c_str(), data.data(),
                                static_cast<int>(data.size()));
     if (s != NATS_OK) {
       LOG_ERROR("publish: {}\n", natsStatus_GetText(s));

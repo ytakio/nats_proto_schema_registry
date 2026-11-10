@@ -33,7 +33,12 @@ Core library (always required):
 Optional (resolved only by the target that needs them):
 
 - googletest (tests only)
-- mcap, lz4, zstd (mcap example only)
+- mcap, OpenSSL, lz4, zstd (mcap example only)
+
+> **Note for macOS:** mcap's C++ implementation uses OpenSSL for hashing.
+> Install it with `brew install openssl`. If CMake cannot find it, pass
+> `-DOPENSSL_ROOT_DIR=/opt/homebrew/opt/openssl` (Apple Silicon) or
+> `-DOPENSSL_ROOT_DIR=/usr/local/opt/openssl` (Intel) when configuring.
 
 The CMake build fetches dependencies automatically with `FetchContent` when
 system packages are not found.
@@ -90,7 +95,8 @@ natsConnection_ConnectTo(&conn, "nats://localhost:4444");
 jsCtx* js = nullptr;
 natsConnection_JetStream(&js, conn, nullptr);
 
-auto [reg, reg_err] = schemaregistry::create_registry(js, "metadata", "schemas");
+std::error_code reg_err;
+auto reg = schemaregistry::create_registry(js, "metadata", "schemas", reg_err);
 if (reg_err) {
     std::cerr << "registry: " << reg_err.message() << std::endl;
     return EXIT_FAILURE;
@@ -107,17 +113,19 @@ if (auto push_err = reg->push({}, "orders.created", msg); push_err) {
 ### Look up a schema
 
 ```cpp
-auto [result, pull_err] = reg->pull({}, "orders.created");
+schemaregistry::Metadata meta;
+std::error_code pull_err;
+auto fds = reg->pull({}, "orders.created", meta, pull_err);
 if (pull_err) {
     std::cerr << "pull: " << pull_err.message() << std::endl;
     return EXIT_FAILURE;
 }
-std::cout << result.meta.schema.path << std::endl;
+std::cout << meta.schema.path << std::endl;
 // google/protobuf/wrappers.proto
-std::cout << result.meta.schema.full_name << std::endl;
+std::cout << meta.schema.full_name << std::endl;
 // google.protobuf.StringValue
-std::cout << result.fds.file_size() << std::endl; // count of files
-                                                  // in descriptor set
+std::cout << fds->file_size() << std::endl; // count of files
+                                            // in descriptor set
 ```
 
 ## API
@@ -127,13 +135,14 @@ The main entry point is the `NatsRegistry` class in `registry.hpp`:
 - `push(stop_token, subject, msg)` - register a generated protobuf message.
   Returns `std::error_code` directly because there is no value payload,
   mirroring Go's `error` return idiom.
-- `pull(stop_token, subject)` - retrieve the `FileDescriptorSet` and
-  `Metadata` as `std::pair<pull_result, std::error_code>`. `pull` watches the
-  metadata and schema buckets, so it blocks until the requested subject is
-  registered or cancellation is requested.
+- `pull(stop_token, subject, meta, ec)` - retrieve the `FileDescriptorSet` and
+  `Metadata`. `pull` watches the metadata and schema buckets, so it blocks until
+  the requested subject is registered or cancellation is requested. The
+  `FileDescriptorSet` is returned as `std::unique_ptr<FileDescriptorSet>`, and
+  the metadata is written to the `meta` output parameter.
 
-Errors are reported through `std::error_code`. Use structured bindings or check
-`.second` to access the error code.
+Errors are reported through `std::error_code`. Check the returned `std::error_code`
+argument to detect failures.
 
 Cancellation is expressed with `std::stop_token`. For timeouts, create a
 `std::stop_source` and request stop after the desired duration.
