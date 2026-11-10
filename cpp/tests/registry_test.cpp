@@ -55,6 +55,43 @@ private:
 
 } // namespace
 
+TEST(RegistryTest, GetReturnsEntry) {
+    auto kv = std::make_unique<MockKeyValue>();
+    MockKeyValue* raw_kv = kv.get();
+
+    NatsRegistry reg(
+        std::move(kv),
+        std::make_unique<MockKeyValue>()
+    );
+
+    const std::string key = "orders.created";
+    const std::string value = "hello";
+    std::uint64_t rev = 0;
+    auto ec = raw_kv->put(
+        key,
+        std::span{reinterpret_cast<const std::byte*>(value.data()), value.size()},
+        rev
+    );
+    ASSERT_FALSE(ec) << ec.message();
+
+    std::error_code get_err;
+    auto entry = raw_kv->get(key, get_err);
+    ASSERT_TRUE(entry) << get_err.message();
+    EXPECT_EQ(entry->key(), key);
+
+    const auto val = entry->value();
+    const std::string got(reinterpret_cast<const char*>(val.data()), val.size());
+    EXPECT_EQ(got, value);
+}
+
+TEST(RegistryTest, GetNotFound) {
+    MockKeyValue kv;
+    std::error_code ec;
+    auto entry = kv.get("missing.key", ec);
+    EXPECT_FALSE(entry);
+    EXPECT_EQ(ec, make_error_code(errc::not_found));
+}
+
 TEST(RegistryTest, PushAndPull) {
     NatsRegistry reg(
         std::make_unique<MockKeyValue>(),
@@ -176,7 +213,7 @@ TEST(RegistryTest, PullCancellation) {
     EXPECT_EQ(pull_err, make_error_code(errc::cancelled));
 }
 
-TEST(RegistryTest, BuildFileDescriptorSetIncludesDependencies) {
+TEST(RegistryTest, PullIncludesDependencies) {
     NatsRegistry reg(
         std::make_unique<MockKeyValue>(),
         std::make_unique<MockKeyValue>()
@@ -201,7 +238,7 @@ TEST(RegistryTest, BuildFileDescriptorSetIncludesDependencies) {
     EXPECT_TRUE(found);
 }
 
-TEST(RegistryTest, BuildFileDescriptorSetIncludesTransitiveGoogleImports) {
+TEST(RegistryTest, PullIncludesTransitiveGoogleImports) {
     NatsRegistry reg(
         std::make_unique<MockKeyValue>(),
         std::make_unique<MockKeyValue>()

@@ -31,7 +31,6 @@
 #include <map>
 #include <memory>
 #include <mutex>
-#include <optional>
 #include <queue>
 #include <span>
 #include <stop_token>
@@ -137,16 +136,27 @@ public:
         }
     }
 
-    void notify(std::string_view key, std::span<const std::byte> value) {
+    void notify(std::string_view key, std::span<const std::byte> value,
+                Operation op = Operation::put) {
         {
             std::lock_guard<std::mutex> lock(mutex_);
             if (cancelled_) {
                 return;
             }
             queue_.push(std::make_unique<MockKeyValueEntry>(
-                std::string(key), std::vector<std::byte>(value.begin(), value.end())));
+                std::string(key), std::vector<std::byte>(value.begin(), value.end()), op));
         }
         cv_.notify_one();
+    }
+
+    void notify_delete(std::string_view key) {
+        std::vector<std::byte> empty;
+        notify(key, empty, Operation::del);
+    }
+
+    void notify_purge(std::string_view key) {
+        std::vector<std::byte> empty;
+        notify(key, empty, Operation::purge);
     }
 
 private:
