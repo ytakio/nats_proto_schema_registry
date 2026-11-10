@@ -33,7 +33,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <memory>
-#include <optional>
 #include <span>
 #include <stop_token>
 #include <string>
@@ -85,9 +84,7 @@ private:
 
 class NatsKeyWatcher : public IKeyWatcher {
 public:
-  NatsKeyWatcher(
-      kvWatcher *watcher, std::string key,
-      std::chrono::milliseconds timeout = std::chrono::milliseconds{1000})
+  NatsKeyWatcher(kvWatcher *watcher, std::string key, IKeyValue::msec timeout)
       : watcher_(watcher), key_(std::move(key)), timeout_(timeout) {}
 
   ~NatsKeyWatcher() override { kvWatcher_Destroy(watcher_); }
@@ -97,19 +94,11 @@ public:
   NatsKeyWatcher(NatsKeyWatcher &&) = delete;
   NatsKeyWatcher &operator=(NatsKeyWatcher &&) = delete;
 
-  [[nodiscard]] std::shared_ptr<IKeyValueEntry>
+  [[nodiscard]] std::unique_ptr<IKeyValueEntry>
   next(std::stop_token stop_token, std::error_code &ec) override {
     // Use a stop callback to interrupt the blocking watcher when
-    // cancellation is requested. A small functor avoids the heap
-    // allocation that std::function would incur.
-    struct stopper {
-      kvWatcher *watcher;
-      void operator()() const noexcept { kvWatcher_Stop(watcher); }
-    };
-    std::optional<std::stop_callback<stopper>> cb;
-    if (stop_token.stop_possible()) {
-      cb.emplace(stop_token, stopper{watcher_});
-    }
+    // cancellation is requested.
+    std::stop_callback cb{stop_token, [w = watcher_] { kvWatcher_Stop(w); }};
 
     kvEntry *entry = nullptr;
     const natsStatus s = kvWatcher_Next(&entry, watcher_,
@@ -127,7 +116,7 @@ public:
     if (entry == nullptr) {
       return {};
     }
-    return std::make_shared<NatsKeyValueEntry>(entry);
+    return std::make_unique<NatsKeyValueEntry>(entry);
   }
 
   void stop() override { kvWatcher_Stop(watcher_); }
@@ -135,7 +124,7 @@ public:
 private:
   kvWatcher *watcher_;
   std::string key_;
-  std::chrono::milliseconds timeout_{1000};
+  IKeyValue::msec timeout_{1000};
 };
 
 class NatsKeyValue : public IKeyValue {
@@ -181,8 +170,7 @@ public:
 
   [[nodiscard]] std::unique_ptr<IKeyWatcher>
   watch(std::string_view key, std::error_code &ec,
-        std::chrono::milliseconds timeout = std::chrono::milliseconds{1000})
-      override {
+        IKeyValue::msec timeout) override {
     kvWatchOptions opts{};
     kvWatchOptions_Init(&opts);
     opts.IgnoreDeletes = true;

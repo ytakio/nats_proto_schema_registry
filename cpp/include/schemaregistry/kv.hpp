@@ -59,7 +59,7 @@ public:
 
   // Returns an entry on a real update, nullptr on a timeout/initial marker,
   // or an error if the watcher fails.
-  [[nodiscard]] virtual std::shared_ptr<IKeyValueEntry>
+  [[nodiscard]] virtual std::unique_ptr<IKeyValueEntry>
   next(std::stop_token stop_token, std::error_code &ec) = 0;
 
   virtual void stop() = 0;
@@ -68,6 +68,8 @@ public:
 // IKeyValue is a minimal abstraction over a NATS KV bucket.
 class IKeyValue {
 public:
+  using msec = std::chrono::milliseconds;
+
   virtual ~IKeyValue() = default;
 
   // Stores value under key. On success rev is set to the new revision.
@@ -78,9 +80,8 @@ public:
   // Convenience overload for callers that already hold a std::string
   // (e.g. values produced by protobuf's SerializeToString).
   // Kept virtual so implementations may override the conversion strategy.
-  [[nodiscard]] virtual std::error_code put(std::string_view key,
-                                            std::string_view value,
-                                            std::uint64_t &rev) {
+  [[nodiscard]] virtual std::error_code
+  put(std::string_view key, std::string_view value, std::uint64_t &rev) {
     return put(key,
                std::span{reinterpret_cast<const std::byte *>(value.data()),
                          value.size()},
@@ -98,7 +99,7 @@ public:
   // Returns nullptr and sets ec on failure.
   [[nodiscard]] virtual std::unique_ptr<IKeyWatcher>
   watch(std::string_view key, std::error_code &ec,
-        std::chrono::milliseconds timeout = std::chrono::milliseconds{1000}) = 0;
+        msec timeout = msec{1000}) = 0;
 
   [[nodiscard]] virtual std::string_view bucket() const = 0;
 };

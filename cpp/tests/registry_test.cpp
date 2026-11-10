@@ -19,7 +19,6 @@
 // SOFTWARE.
 
 #include "mock_kv_store.hpp"
-#include "schemaregistry/descriptor.hpp"
 #include "schemaregistry/registry.hpp"
 
 #include <google/protobuf/any.pb.h>
@@ -37,9 +36,11 @@ using namespace schemaregistry::testing;
 
 namespace {
 
+using msec = schemaregistry::IKeyValue::msec;
+
 class TimeoutSource {
 public:
-    explicit TimeoutSource(std::chrono::milliseconds timeout)
+    explicit TimeoutSource(msec timeout)
         : thread_([this, timeout] {
               std::this_thread::sleep_for(timeout);
               source_.request_stop();
@@ -99,7 +100,7 @@ TEST(RegistryTest, PullNotFound) {
         std::make_unique<MockKeyValue>()
     );
 
-    TimeoutSource source(std::chrono::milliseconds(50));
+    TimeoutSource source(msec(50));
     Metadata meta;
     std::error_code pull_err;
     auto fds = reg.pull(source.get_token(), "unknown.subject", meta, pull_err);
@@ -135,7 +136,7 @@ TEST(RegistryTest, PullWaitsForPush) {
         }
     });
 
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    std::this_thread::sleep_for(msec(50));
     auto push_err = reg.push({}, subject, msg);
     ASSERT_FALSE(push_err) << push_err.message();
     pull_thread.join();
@@ -175,13 +176,23 @@ TEST(RegistryTest, PullCancellation) {
     EXPECT_EQ(pull_err, make_error_code(errc::cancelled));
 }
 
-TEST(DescriptorTest, BuildFileDescriptorSetIncludesDependencies) {
-    google::protobuf::Any any;
-    auto fds = schemaregistry::detail::build_file_descriptor_set(any.GetDescriptor()->file());
-    EXPECT_GT(fds.file_size(), 0);
+TEST(RegistryTest, BuildFileDescriptorSetIncludesDependencies) {
+    NatsRegistry reg(
+        std::make_unique<MockKeyValue>(),
+        std::make_unique<MockKeyValue>()
+    );
+
+    auto push_err = reg.push({}, "events.any", google::protobuf::Any{});
+    ASSERT_FALSE(push_err) << push_err.message();
+
+    Metadata meta;
+    std::error_code pull_err;
+    auto fds = reg.pull({}, "events.any", meta, pull_err);
+    ASSERT_TRUE(fds) << pull_err.message();
+    EXPECT_GT(fds->file_size(), 0);
 
     bool found = false;
-    for (const auto& f : fds.file()) {
+    for (const auto& f : fds->file()) {
         if (f.name() == "google/protobuf/any.proto") {
             found = true;
             break;
@@ -190,10 +201,21 @@ TEST(DescriptorTest, BuildFileDescriptorSetIncludesDependencies) {
     EXPECT_TRUE(found);
 }
 
-TEST(DescriptorTest, BuildFileDescriptorSetIncludesTransitiveGoogleImports) {
+TEST(RegistryTest, BuildFileDescriptorSetIncludesTransitiveGoogleImports) {
+    NatsRegistry reg(
+        std::make_unique<MockKeyValue>(),
+        std::make_unique<MockKeyValue>()
+    );
+
     google::protobuf::Type type;
-    auto fds = schemaregistry::detail::build_file_descriptor_set(type.GetDescriptor()->file());
-    EXPECT_GT(fds.file_size(), 0);
+    auto push_err = reg.push({}, "events.type", type);
+    ASSERT_FALSE(push_err) << push_err.message();
+
+    Metadata meta;
+    std::error_code pull_err;
+    auto fds = reg.pull({}, "events.type", meta, pull_err);
+    ASSERT_TRUE(fds) << pull_err.message();
+    EXPECT_GT(fds->file_size(), 0);
 
     const std::vector<std::string> required = {
         "google/protobuf/type.proto",
@@ -202,7 +224,7 @@ TEST(DescriptorTest, BuildFileDescriptorSetIncludesTransitiveGoogleImports) {
     };
     for (const auto& name : required) {
         bool found = false;
-        for (const auto& f : fds.file()) {
+        for (const auto& f : fds->file()) {
             if (f.name() == name) {
                 found = true;
                 break;

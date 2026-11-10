@@ -20,7 +20,6 @@
 
 #pragma once
 
-#include "schemaregistry/descriptor.hpp"
 #include "schemaregistry/error.hpp"
 #include "schemaregistry/kv.hpp"
 #include "schemaregistry/nats_kv.hpp"
@@ -35,6 +34,7 @@
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <unordered_set>
 
 namespace schemaregistry {
 
@@ -77,7 +77,7 @@ public:
       return make_error_code(errc::internal);
     }
 
-    FileDescriptorSet fds = detail::build_file_descriptor_set(file);
+    FileDescriptorSet fds = build_file_descriptor_set_(file);
 
     std::string schema_bytes;
     if (!fds.SerializeToString(&schema_bytes)) {
@@ -124,7 +124,7 @@ public:
       return nullptr;
     }
 
-    auto meta_entry = watch_key(stop_token, metadata_kv_.get(), subject, ec);
+    auto meta_entry = watch_key(stop_token, metadata_kv_, subject, ec);
     if (ec) {
       return nullptr;
     }
@@ -141,7 +141,7 @@ public:
     }
 
     auto schema_entry =
-        watch_key(stop_token, schema_kv_.get(), parsed_meta.schema.path, ec);
+        watch_key(stop_token, schema_kv_, parsed_meta.schema.path, ec);
     if (ec) {
       return nullptr;
     }
@@ -166,15 +166,16 @@ private:
   // Watch a key in a KeyValue store until a real value is available.
   // Deleted or purged entries are ignored so that callers wait for a real
   // value. Returns an error if the watcher fails or cancellation is requested.
-  [[nodiscard]] static std::shared_ptr<IKeyValueEntry>
-  watch_key(std::stop_token stop_token, IKeyValue *kv, std::string_view key,
-            std::error_code &ec) {
+  [[nodiscard]] static std::unique_ptr<IKeyValueEntry>
+  watch_key(std::stop_token stop_token, const std::unique_ptr<IKeyValue> &kv,
+            std::string_view key, std::error_code &ec) {
     if (stop_token.stop_requested()) {
       ec = make_error_code(errc::cancelled);
       return nullptr;
     }
-    if (kv == nullptr) {
-      ec = make_error_code(errc::internal);
+
+    if (!kv) {
+      ec = make_error_code(errc::invalid_argument);
       return nullptr;
     }
 
@@ -209,6 +210,41 @@ private:
 
       return entry;
     }
+  }
+
+  // Walks from the file descriptor through all transitive imports, producing
+  // a FileDescriptorSet. The resulting files are ordered so that dependencies
+  // appear before the files that import them.
+  [[nodiscard]] static FileDescriptorSet
+  build_file_descriptor_set_(const FileDescriptor *file) {
+    FileDescriptorSet fds;
+    std::unordered_set<std::string_view> seen;
+
+    struct collector {
+      FileDescriptorSet &fds;
+      std::unordered_set<std::string_view> &seen;
+
+      void collect(const FileDescriptor *f) {
+        if (f == nullptr) {
+          return;
+        }
+        const std::string_view path = f->name();
+        if (!seen.insert(path).second) {
+          return;
+        }
+
+        // Collect dependencies first so the resulting FileDescriptorSet
+        // is in a valid topological order.
+        for (int i = 0; i < f->dependency_count(); ++i) {
+          collect(f->dependency(i));
+        }
+
+        f->CopyTo(fds.add_file());
+      }
+    };
+
+    collector{fds, seen}.collect(file);
+    return fds;
   }
 
   std::unique_ptr<IKeyValue> metadata_kv_;

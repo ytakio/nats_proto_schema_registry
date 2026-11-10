@@ -76,13 +76,13 @@ public:
         : key_(std::move(key))
         , parent_mutex_(parent_mutex)
         , watchers_(watchers) {
-        std::shared_ptr<MockKeyValueEntry> initial;
+        std::unique_ptr<MockKeyValueEntry> initial;
         {
             std::lock_guard<std::mutex> lock(parent_mutex_);
             watchers_[key_].push_back(this);
             auto it = data.find(key_);
             if (it != data.end()) {
-                initial = std::make_shared<MockKeyValueEntry>(key_, it->second);
+                initial = std::make_unique<MockKeyValueEntry>(key_, it->second);
             }
         }
 
@@ -100,7 +100,7 @@ public:
     MockKeyWatcher(const MockKeyWatcher&) = delete;
     MockKeyWatcher& operator=(const MockKeyWatcher&) = delete;
 
-    [[nodiscard]] std::shared_ptr<IKeyValueEntry>
+    [[nodiscard]] std::unique_ptr<IKeyValueEntry>
     next(std::stop_token stop_token, std::error_code &ec) override {
         std::unique_lock<std::mutex> lock(mutex_);
         auto predicate = [this] { return cancelled_ || !queue_.empty(); };
@@ -137,13 +137,14 @@ public:
         }
     }
 
-    void notify(std::shared_ptr<IKeyValueEntry> entry) {
+    void notify(std::string_view key, std::span<const std::byte> value) {
         {
             std::lock_guard<std::mutex> lock(mutex_);
             if (cancelled_) {
                 return;
             }
-            queue_.push(std::move(entry));
+            queue_.push(std::make_unique<MockKeyValueEntry>(
+                std::string(key), std::vector<std::byte>(value.begin(), value.end())));
         }
         cv_.notify_one();
     }
@@ -164,7 +165,7 @@ private:
     std::mutex mutex_;
     std::condition_variable cv_;
     bool cancelled_ = false;
-    std::queue<std::shared_ptr<IKeyValueEntry>> queue_;
+    std::queue<std::unique_ptr<IKeyValueEntry>> queue_;
 };
 
 class MockKeyValue : public IKeyValue {
@@ -176,16 +177,11 @@ public:
         std::span<const std::byte> value,
         std::uint64_t &rev
     ) override {
-        std::shared_ptr<IKeyValueEntry> entry;
         std::vector<MockKeyWatcher*> watchers_copy;
         {
             std::lock_guard<std::mutex> lock(mutex_);
             std::vector<std::byte> copy(value.begin(), value.end());
             data_[std::string(key)] = std::move(copy);
-            entry = std::make_shared<MockKeyValueEntry>(
-                std::string(key),
-                data_[std::string(key)]
-            );
 
             auto it = watchers_.find(std::string(key));
             if (it != watchers_.end()) {
@@ -194,7 +190,7 @@ public:
         }
 
         for (auto* watcher : watchers_copy) {
-            watcher->notify(entry);
+            watcher->notify(key, value);
         }
         rev = std::uint64_t{1};
         return {};
@@ -216,7 +212,7 @@ public:
     watch(
         std::string_view key,
         std::error_code &ec,
-        std::chrono::milliseconds /*timeout*/ = std::chrono::milliseconds{1000}
+        msec /*timeout*/ = msec{1000}
     ) override {
         ec = {};
         return std::make_unique<MockKeyWatcher>(
