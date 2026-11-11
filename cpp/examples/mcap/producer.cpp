@@ -18,7 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "schemaregistry/registry.hpp"
+#include "schemaregistry/nats/connection.hpp"
+#include "schemaregistry/nats_registry.hpp"
 #include "sensor.pb.h"
 
 #include <google/protobuf/type.pb.h>
@@ -92,30 +93,25 @@ int main(int argc, char **argv) {
   std::signal(SIGINT, signal_handler);
   std::signal(SIGTERM, signal_handler);
 
-  natsStatus s = NATS_OK;
-  natsConnection *conn = nullptr;
-  jsCtx *js = nullptr;
-
-  s = natsConnection_ConnectTo(&conn, opts.url.c_str());
-  if (s != NATS_OK) {
-    LOG_ERROR("connect: {}\n", natsStatus_GetText(s));
+  std::error_code conn_err;
+  auto conn = schemaregistry::nats::Connection::connect(opts.url, conn_err);
+  if (conn_err) {
+    LOG_ERROR("connect: {}\n", conn_err.message());
     return EXIT_FAILURE;
   }
 
-  s = natsConnection_JetStream(&js, conn, nullptr);
-  if (s != NATS_OK) {
-    LOG_ERROR("jetstream: {}\n", natsStatus_GetText(s));
-    natsConnection_Destroy(conn);
+  std::error_code js_err;
+  auto js = conn->jetstream(js_err);
+  if (js_err) {
+    LOG_ERROR("jetstream: {}\n", js_err.message());
     return EXIT_FAILURE;
   }
 
   std::error_code reg_err;
-  auto reg = schemaregistry::create_registry(js, opts.metadata_bucket,
+  auto reg = schemaregistry::create_registry(*js, opts.metadata_bucket,
                                              opts.schema_bucket, reg_err);
   if (reg_err) {
     LOG_ERROR("registry: {}\n", reg_err.message());
-    jsCtx_Destroy(js);
-    natsConnection_Destroy(conn);
     return EXIT_FAILURE;
   }
 
@@ -125,8 +121,6 @@ int main(int argc, char **argv) {
   auto push_err = reg->push({}, opts.subject, placeholder);
   if (push_err) {
     LOG_ERROR("push: {}\n", push_err.message());
-    jsCtx_Destroy(js);
-    natsConnection_Destroy(conn);
     return EXIT_FAILURE;
   }
   LOG_INFO("registered schema for subject \"{}\"\n", opts.subject);
@@ -156,10 +150,9 @@ int main(int argc, char **argv) {
       break;
     }
 
-    s = natsConnection_Publish(conn, opts.subject.c_str(), data.data(),
-                               static_cast<int>(data.size()));
-    if (s != NATS_OK) {
-      LOG_ERROR("publish: {}\n", natsStatus_GetText(s));
+    auto pub_err = conn->publish(opts.subject, data);
+    if (pub_err) {
+      LOG_ERROR("publish: {}\n", pub_err.message());
       break;
     }
     LOG_INFO("published seq={}\n", seq);
@@ -169,7 +162,5 @@ int main(int argc, char **argv) {
 
   LOG_INFO("producer shutting down after {} messages\n", seq);
 
-  jsCtx_Destroy(js);
-  natsConnection_Destroy(conn);
   return EXIT_SUCCESS;
 }

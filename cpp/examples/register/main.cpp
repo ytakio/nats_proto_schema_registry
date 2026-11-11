@@ -18,7 +18,8 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "schemaregistry/registry.hpp"
+#include "schemaregistry/nats/connection.hpp"
+#include "schemaregistry/nats_registry.hpp"
 
 #include <google/protobuf/wrappers.pb.h>
 
@@ -32,29 +33,26 @@
 #define LOG_ERROR(...) std::cerr << std::format(__VA_ARGS__) << std::flush
 
 int main() {
-  natsStatus s = NATS_OK;
-  natsConnection *conn = nullptr;
-  jsCtx *js = nullptr;
-
-  s = natsConnection_ConnectTo(&conn, "nats://localhost:4444");
-  if (s != NATS_OK) {
-    LOG_ERROR("connect: {}\n", natsStatus_GetText(s));
+  std::error_code conn_err;
+  auto conn = schemaregistry::nats::Connection::connect("nats://localhost:4444",
+                                                        conn_err);
+  if (conn_err) {
+    LOG_ERROR("connect: {}\n", conn_err.message());
     return EXIT_FAILURE;
   }
 
-  s = natsConnection_JetStream(&js, conn, nullptr);
-  if (s != NATS_OK) {
-    LOG_ERROR("jetstream: {}\n", natsStatus_GetText(s));
-    natsConnection_Destroy(conn);
+  std::error_code js_err;
+  auto js = conn->jetstream(js_err);
+  if (js_err) {
+    LOG_ERROR("jetstream: {}\n", js_err.message());
     return EXIT_FAILURE;
   }
 
   std::error_code reg_err;
-  auto reg = schemaregistry::create_registry(js, "metadata", "schemas", reg_err);
+  auto reg =
+      schemaregistry::create_registry(*js, "metadata", "schemas", reg_err);
   if (reg_err) {
     LOG_ERROR("registry: {}\n", reg_err.message());
-    jsCtx_Destroy(js);
-    natsConnection_Destroy(conn);
     return EXIT_FAILURE;
   }
 
@@ -66,14 +64,9 @@ int main() {
   auto push_err = reg->push({}, subject, msg);
   if (push_err) {
     LOG_ERROR("push: {}\n", push_err.message());
-    jsCtx_Destroy(js);
-    natsConnection_Destroy(conn);
     return EXIT_FAILURE;
   }
 
   LOG_INFO("pushed schema for subject \"{}\"\n", subject);
-
-  jsCtx_Destroy(js);
-  natsConnection_Destroy(conn);
   return EXIT_SUCCESS;
 }

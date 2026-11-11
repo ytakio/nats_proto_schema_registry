@@ -18,7 +18,9 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "schemaregistry/registry.hpp"
+#include "schemaregistry/nats/connection.hpp"
+#include "schemaregistry/nats/message.hpp"
+#include "schemaregistry/nats_registry.hpp"
 #include "sensor.pb.h"
 
 #include <mcap/writer.hpp>
@@ -90,12 +92,12 @@ struct Options {
   return true;
 }
 
-// Thread-safe queue that takes ownership of natsMsg pointers delivered by the
+// Thread-safe queue that takes ownership of messages delivered by the
 // asynchronous subscription callback. The main loop consumes from this queue
 // and writes messages to the MCAP file.
 class MsgQueue {
 public:
-  void push(natsMsg *msg) {
+  void push(schemaregistry::nats::Message *msg) {
     {
       std::lock_guard<std::mutex> lock(mutex_);
       queue_.push(msg);
@@ -103,46 +105,38 @@ public:
     cv_.notify_one();
   }
 
-  // Returns nullptr immediately if the queue is empty or if shutdown is
-  // requested. The caller takes ownership of the returned natsMsg.
-  [[nodiscard]] natsMsg *try_pop() {
+  // Returns nullptr immediately if the queue is empty. The caller takes
+  // ownership of the returned Message.
+  [[nodiscard]] std::unique_ptr<schemaregistry::nats::Message> try_pop() {
     std::lock_guard<std::mutex> lock(mutex_);
     if (queue_.empty()) {
       return nullptr;
     }
-    natsMsg *msg = queue_.front();
+    auto msg = std::unique_ptr<schemaregistry::nats::Message>(queue_.front());
     queue_.pop();
     return msg;
   }
 
-  // Wait up to timeout_ms for a message. Returns nullptr on timeout or when
-  // shutdown is requested. The caller takes ownership of the returned natsMsg.
-  [[nodiscard]] natsMsg *pop(std::chrono::milliseconds timeout) {
+  // Wait up to timeout_ms for a message. Returns nullptr on timeout.
+  // The caller takes ownership of the returned Message.
+  [[nodiscard]] std::unique_ptr<schemaregistry::nats::Message>
+  pop(std::chrono::milliseconds timeout) {
     std::unique_lock<std::mutex> lock(mutex_);
     bool has_msg =
         cv_.wait_for(lock, timeout, [this] { return !queue_.empty(); });
     if (!has_msg) {
       return nullptr;
     }
-    natsMsg *msg = queue_.front();
+    auto msg = std::unique_ptr<schemaregistry::nats::Message>(queue_.front());
     queue_.pop();
     return msg;
   }
 
 private:
-  std::queue<natsMsg *> queue_;
+  std::queue<schemaregistry::nats::Message *> queue_;
   std::mutex mutex_;
   std::condition_variable cv_;
 };
-
-// NATS asynchronous message callback. The library invokes this on its own
-// dispatcher thread, so ownership of the message is handed off to the queue
-// for consumption by the main loop.
-static void on_msg(natsConnection * /*nc*/, natsSubscription * /*sub*/,
-                   natsMsg *msg, void *closure) {
-  auto *queue = static_cast<MsgQueue *>(closure);
-  queue->push(msg);
-}
 
 } // namespace
 
@@ -155,44 +149,39 @@ int main(int argc, char **argv) {
   std::signal(SIGINT, signal_handler);
   std::signal(SIGTERM, signal_handler);
 
-  natsStatus s = NATS_OK;
-  natsConnection *conn = nullptr;
-  jsCtx *js = nullptr;
-
-  s = natsConnection_ConnectTo(&conn, opts.url.c_str());
-  if (s != NATS_OK) {
-    LOG_ERROR("connect: {}\n", natsStatus_GetText(s));
+  std::error_code conn_err;
+  auto conn = schemaregistry::nats::Connection::connect(opts.url, conn_err);
+  if (conn_err) {
+    LOG_ERROR("connect: {}\n", conn_err.message());
     return EXIT_FAILURE;
   }
 
-  s = natsConnection_JetStream(&js, conn, nullptr);
-  if (s != NATS_OK) {
-    LOG_ERROR("jetstream: {}\n", natsStatus_GetText(s));
-    natsConnection_Destroy(conn);
+  std::error_code js_err;
+  auto js = conn->jetstream(js_err);
+  if (js_err) {
+    LOG_ERROR("jetstream: {}\n", js_err.message());
     return EXIT_FAILURE;
   }
 
   std::error_code reg_err;
-  auto reg = schemaregistry::create_registry(js, opts.metadata_bucket,
+  auto reg = schemaregistry::create_registry(*js, opts.metadata_bucket,
                                              opts.schema_bucket, reg_err);
   if (reg_err) {
     LOG_ERROR("registry: {}\n", reg_err.message());
-    jsCtx_Destroy(js);
-    natsConnection_Destroy(conn);
     return EXIT_FAILURE;
   }
 
   MsgQueue msg_queue;
 
-  // Subscribe before waiting for the schema so messages published while we
-  // are waiting are buffered by the NATS client and delivered to on_msg.
-  natsSubscription *sub = nullptr;
-  s = natsConnection_Subscribe(&sub, conn, opts.subject.c_str(), on_msg,
-                               &msg_queue);
-  if (s != NATS_OK) {
-    LOG_ERROR("subscribe: {}\n", natsStatus_GetText(s));
-    jsCtx_Destroy(js);
-    natsConnection_Destroy(conn);
+  std::error_code sub_err;
+  auto sub = conn->subscribe(
+      opts.subject,
+      [&msg_queue](std::unique_ptr<schemaregistry::nats::Message> msg) {
+        msg_queue.push(msg.release());
+      },
+      sub_err);
+  if (sub_err) {
+    LOG_ERROR("subscribe: {}\n", sub_err.message());
     return EXIT_FAILURE;
   }
   LOG_INFO("recorder subscribed to \"{}\", waiting for schema...\n",
@@ -204,9 +193,6 @@ int main(int argc, char **argv) {
   auto fds = reg->pull({}, opts.subject, meta, pull_err);
   if (pull_err) {
     LOG_ERROR("pull schema: {}\n", pull_err.message());
-    natsSubscription_Destroy(sub);
-    jsCtx_Destroy(js);
-    natsConnection_Destroy(conn);
     return EXIT_FAILURE;
   }
 
@@ -217,9 +203,6 @@ int main(int argc, char **argv) {
   std::ofstream out(opts.output, std::ios::binary);
   if (!out) {
     LOG_ERROR("create output file: {}\n", opts.output);
-    natsSubscription_Destroy(sub);
-    jsCtx_Destroy(js);
-    natsConnection_Destroy(conn);
     return EXIT_FAILURE;
   }
 
@@ -232,9 +215,6 @@ int main(int argc, char **argv) {
   if (!fds->SerializeToString(&schema_data)) {
     LOG_ERROR("marshal schema\n");
     writer.close();
-    natsSubscription_Destroy(sub);
-    jsCtx_Destroy(js);
-    natsConnection_Destroy(conn);
     return EXIT_FAILURE;
   }
 
@@ -259,7 +239,7 @@ int main(int argc, char **argv) {
   // recorded with monotonically increasing sequence numbers.
   std::uint32_t received = 0;
   while (g_running) {
-    natsMsg *msg = msg_queue.pop(std::chrono::milliseconds(100));
+    auto msg = msg_queue.pop(std::chrono::milliseconds(100));
     if (msg == nullptr) {
       continue;
     }
@@ -276,29 +256,23 @@ int main(int argc, char **argv) {
     mcap_msg.logTime = static_cast<mcap::Timestamp>(ns);
     mcap_msg.publishTime = mcap_msg.logTime;
 
-    const char *payload = natsMsg_GetData(msg);
-    const int payload_len = natsMsg_GetDataLength(msg);
-    if (payload && payload_len > 0) {
-      mcap_msg.data = reinterpret_cast<const std::byte *>(payload);
-      mcap_msg.dataSize = static_cast<std::uint64_t>(payload_len);
+    const auto payload = msg->data();
+    if (!payload.empty()) {
+      mcap_msg.data = payload.data();
+      mcap_msg.dataSize = static_cast<std::uint64_t>(payload.size());
     }
 
     auto status = writer.write(mcap_msg);
     if (!status.ok()) {
       LOG_ERROR("mcap write: {}\n", status.message);
-      natsMsg_Destroy(msg);
       break;
     }
-    natsMsg_Destroy(msg);
 
     LOG_INFO("recorded seq={}\n", received);
   }
 
   writer.close();
-  natsSubscription_Destroy(sub);
   LOG_INFO("shutdown signal received, wrote {} messages\n", received);
 
-  jsCtx_Destroy(js);
-  natsConnection_Destroy(conn);
   return EXIT_SUCCESS;
 }

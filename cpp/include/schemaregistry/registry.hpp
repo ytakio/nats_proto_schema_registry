@@ -20,9 +20,8 @@
 
 #pragma once
 
-#include "schemaregistry/error.hpp"
-#include "schemaregistry/kv.hpp"
-#include "schemaregistry/nats_kv.hpp"
+#include "schemaregistry/nats/error.hpp"
+#include "schemaregistry/nats/kv.hpp"
 #include "schemaregistry/types.hpp"
 
 #include <google/protobuf/descriptor.pb.h>
@@ -31,6 +30,7 @@
 #include <glaze/glaze.hpp>
 
 #include <memory>
+#include <span>
 #include <stop_token>
 #include <string>
 #include <string_view>
@@ -39,18 +39,43 @@
 
 namespace schemaregistry {
 
-// NatsRegistry stores per-subject metadata and per-proto-file schema blobs in
-// two NATS Key-Value buckets. It is header-only and does not throw exceptions;
-// all errors are reported through std::error_code.
-class NatsRegistry {
+using nats::kv_operation;
+using nats::make_nats_error;
+
+// Registry stores per-subject metadata and per-proto-file schema blobs in two
+// KeyValue backends. It is header-only and does not throw exceptions; all
+// errors are reported through std::error_code.
+//
+// MetadataKV and SchemaKV are duck-typed. They must provide:
+//
+//   std::error_code put(std::string_view key, std::span<const std::byte> value,
+//                       std::uint64_t &rev);
+//   std::error_code put(std::string_view key, std::string_view value,
+//                       std::uint64_t &rev);
+//   auto get(std::string_view key, std::error_code &ec)
+//       -> std::unique_ptr<Entry>;
+//   auto watch(std::string_view key, std::error_code &ec,
+//              std::chrono::milliseconds timeout)
+//       -> std::unique_ptr<Watcher>;
+//   std::string_view bucket() const;
+//
+// Entry must provide:
+//   std::string_view key() const;
+//   std::span<const std::byte> value() const;
+//   kv_operation operation() const;
+//
+// Watcher must provide:
+//   auto next(std::stop_token, std::error_code&) -> std::unique_ptr<Entry>;
+//   void stop();
+template <typename MetadataKV, typename SchemaKV> class Registry {
 public:
   using FileDescriptorSet = google::protobuf::FileDescriptorSet;
   using Message = google::protobuf::Message;
   using Descriptor = google::protobuf::Descriptor;
   using FileDescriptor = google::protobuf::FileDescriptor;
 
-  NatsRegistry(std::unique_ptr<IKeyValue> metadata_kv,
-               std::unique_ptr<IKeyValue> schema_kv)
+  Registry(std::unique_ptr<MetadataKV> metadata_kv,
+           std::unique_ptr<SchemaKV> schema_kv)
       : metadata_kv_(std::move(metadata_kv)), schema_kv_(std::move(schema_kv)) {
   }
 
@@ -62,27 +87,27 @@ public:
                                      const Message &msg) {
 
     if (stop_token.stop_requested()) {
-      return make_error_code(errc::cancelled);
+      return make_nats_error(NATS_TIMEOUT);
     }
     if (subject.empty()) {
-      return make_error_code(errc::invalid_argument);
+      return make_nats_error(NATS_INVALID_ARG);
     }
 
     const Descriptor *descriptor = msg.GetDescriptor();
     if (descriptor == nullptr) {
-      return make_error_code(errc::invalid_argument);
+      return make_nats_error(NATS_INVALID_ARG);
     }
 
     const FileDescriptor *file = descriptor->file();
     if (file == nullptr) {
-      return make_error_code(errc::internal);
+      return make_nats_error(NATS_ERR);
     }
 
     FileDescriptorSet fds = build_file_descriptor_set_(file);
 
     std::string schema_bytes;
     if (!fds.SerializeToString(&schema_bytes)) {
-      return make_error_code(errc::internal);
+      return make_nats_error(NATS_ERR);
     }
 
     Metadata metadata;
@@ -91,7 +116,7 @@ public:
 
     std::string metadata_json;
     if (auto err = glz::write_json(metadata, metadata_json); err) {
-      return make_error_code(errc::internal);
+      return make_nats_error(NATS_ERR);
     }
 
     const std::string_view path = metadata.schema.path;
@@ -117,15 +142,15 @@ public:
        std::error_code &ec) {
 
     if (stop_token.stop_requested()) {
-      ec = make_error_code(errc::cancelled);
+      ec = make_nats_error(NATS_TIMEOUT);
       return nullptr;
     }
     if (subject.empty()) {
-      ec = make_error_code(errc::invalid_argument);
+      ec = make_nats_error(NATS_INVALID_ARG);
       return nullptr;
     }
 
-    auto meta_entry = watch_key(stop_token, metadata_kv_, subject, ec);
+    auto meta_entry = watch_key(stop_token, *metadata_kv_, subject, ec);
     if (ec) {
       return nullptr;
     }
@@ -136,13 +161,13 @@ public:
       const std::string json_str(reinterpret_cast<const char *>(raw.data()),
                                  raw.size());
       if (auto err = glz::read_json(parsed_meta, json_str); err) {
-        ec = make_error_code(errc::internal);
+        ec = make_nats_error(NATS_ERR);
         return nullptr;
       }
     }
 
     auto schema_entry =
-        watch_key(stop_token, schema_kv_, parsed_meta.schema.path, ec);
+        watch_key(stop_token, *schema_kv_, parsed_meta.schema.path, ec);
     if (ec) {
       return nullptr;
     }
@@ -153,7 +178,7 @@ public:
       const std::string fds_bytes(reinterpret_cast<const char *>(raw.data()),
                                   raw.size());
       if (!fds->ParseFromString(fds_bytes)) {
-        ec = make_error_code(errc::internal);
+        ec = make_nats_error(NATS_ERR);
         return nullptr;
       }
     }
@@ -167,37 +192,33 @@ private:
   // Watch a key in a KeyValue store until a real value is available.
   // Deleted or purged entries are ignored so that callers wait for a real
   // value. Returns an error if the watcher fails or cancellation is requested.
-  [[nodiscard]] static std::unique_ptr<IKeyValueEntry>
-  watch_key(std::stop_token stop_token, const std::unique_ptr<IKeyValue> &kv,
-            std::string_view key, std::error_code &ec) {
+  template <typename KV>
+  [[nodiscard]] static auto watch_key(std::stop_token stop_token, KV &kv,
+                                      std::string_view key,
+                                      std::error_code &ec) {
     if (stop_token.stop_requested()) {
-      ec = make_error_code(errc::cancelled);
-      return nullptr;
+      ec = make_nats_error(NATS_TIMEOUT);
+      return decltype(kv.get(key, ec)){};
     }
 
-    if (!kv) {
-      ec = make_error_code(errc::invalid_argument);
-      return nullptr;
-    }
-
-    std::unique_ptr<IKeyWatcher> watcher = kv->watch(key, ec);
+    auto watcher = kv.watch(key, ec);
     if (ec) {
-      return nullptr;
+      return decltype(kv.get(key, ec)){};
     }
     if (!watcher) {
-      ec = make_error_code(errc::internal);
-      return nullptr;
+      ec = make_nats_error(NATS_ERR);
+      return decltype(kv.get(key, ec)){};
     }
 
     for (;;) {
       if (stop_token.stop_requested()) {
-        ec = make_error_code(errc::cancelled);
-        return nullptr;
+        ec = make_nats_error(NATS_TIMEOUT);
+        return decltype(kv.get(key, ec)){};
       }
 
       auto entry = watcher->next(stop_token, ec);
       if (ec) {
-        return nullptr;
+        return decltype(kv.get(key, ec)){};
       }
       if (!entry) {
         // Initial-state marker or timeout with no update; keep waiting.
@@ -205,8 +226,7 @@ private:
       }
 
       const auto op = entry->operation();
-      if (op == IKeyValueEntry::Operation::del ||
-          op == IKeyValueEntry::Operation::purge) {
+      if (op == kv_operation::del || op == kv_operation::purge) {
         continue;
       }
 
@@ -249,57 +269,8 @@ private:
     return fds;
   }
 
-  std::unique_ptr<IKeyValue> metadata_kv_;
-  std::unique_ptr<IKeyValue> schema_kv_;
+  std::unique_ptr<MetadataKV> metadata_kv_;
+  std::unique_ptr<SchemaKV> schema_kv_;
 };
-
-// Create a Registry backed by NATS KV buckets. If the buckets do not exist they
-// are created with default settings. The caller retains ownership of js and is
-// responsible for closing the underlying NATS connection. On failure ec is set
-// and nullptr is returned.
-[[nodiscard]] std::unique_ptr<NatsRegistry>
-create_registry(jsCtx *js, std::string_view metadata_bucket,
-                std::string_view schema_bucket, std::error_code &ec) {
-  if (js == nullptr) {
-    ec = make_error_code(errc::invalid_argument);
-    return nullptr;
-  }
-  if (metadata_bucket.empty() || schema_bucket.empty()) {
-    ec = make_error_code(errc::invalid_argument);
-    return nullptr;
-  }
-
-  auto get_or_create_kv =
-      [&](std::string_view bucket) -> std::unique_ptr<IKeyValue> {
-    const std::string bucket_str{bucket};
-    kvStore *store = nullptr;
-    natsStatus s = js_KeyValue(&store, js, bucket_str.c_str());
-    if (s == NATS_NOT_FOUND) {
-      kvConfig cfg{};
-      kvConfig_Init(&cfg);
-      cfg.Bucket = bucket_str.c_str();
-      s = js_CreateKeyValue(&store, js, &cfg);
-    }
-    if (s == NATS_OK) {
-      return std::make_unique<NatsKeyValue>(store);
-    }
-    ec = make_nats_error(s);
-    return nullptr;
-  };
-
-  auto metadata_kv = get_or_create_kv(metadata_bucket);
-  if (ec) {
-    return nullptr;
-  }
-
-  auto schema_kv = get_or_create_kv(schema_bucket);
-  if (ec) {
-    return nullptr;
-  }
-
-  ec = {};
-  return std::make_unique<NatsRegistry>(std::move(metadata_kv),
-                                        std::move(schema_kv));
-}
 
 } // namespace schemaregistry
