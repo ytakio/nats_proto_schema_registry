@@ -7,6 +7,9 @@ project(nats_proto_schema_registry
     LANGUAGES CXX
 )
 
+# Generate compile_commands.json for clangd and other tooling.
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
+
 # Options default to ON when this project is the top-level build, and OFF when
 # it is consumed as a subdirectory/FetchContent dependency. Downstream projects
 # can override these before calling add_subdirectory/FetchContent_MakeAvailable.
