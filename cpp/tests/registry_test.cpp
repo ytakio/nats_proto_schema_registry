@@ -7,8 +7,8 @@
 // copies of the Software, and to permit persons to whom the Software is
 // furnished to do so, subject to the following conditions:
 //
-// The above copyright notice and this permission notice shall be included in all
-// copies or substantial portions of the Software.
+// The above copyright notice and this permission notice shall be included in
+// all copies or substantial portions of the Software.
 //
 // THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
 // IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
@@ -19,8 +19,8 @@
 // SOFTWARE.
 
 #include "mock_kv_store.hpp"
-#include "schemaregistry/registry.hpp"
 #include "schemaregistry/nats/error.hpp"
+#include "schemaregistry/registry.hpp"
 
 #include <google/protobuf/any.pb.h>
 #include <google/protobuf/type.pb.h>
@@ -68,10 +68,11 @@ TEST(RegistryTest, GetReturnsEntry) {
   const std::string key = "orders.created";
   const std::string value = "hello";
   std::uint64_t rev = 0;
-  auto ec = raw_kv->put(
-      key,
-      std::span{reinterpret_cast<const std::byte *>(value.data()), value.size()},
-      rev);
+  auto ec =
+      raw_kv->put(key,
+                  std::span{reinterpret_cast<const std::byte *>(value.data()),
+                            value.size()},
+                  rev);
   ASSERT_FALSE(ec) << ec.message();
 
   std::error_code get_err;
@@ -254,4 +255,3 @@ TEST(RegistryTest, PullIncludesTransitiveGoogleImports) {
     EXPECT_TRUE(found) << "expected " << name << " in descriptor set";
   }
 }
-

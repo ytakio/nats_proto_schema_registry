@@ -40,20 +40,20 @@
 
 namespace schemaregistry::nats {
 
-// Operation type reported by a KeyValue entry watcher.
-enum class kv_operation {
-  unknown,
-  put,
-  del,
-  purge,
-};
-
 class JetStream;
 
 // RAII wrapper around a kvEntry pointer. Exposes the key, value, revision and
 // operation for a single KeyValue entry.
 class KeyValueEntry {
 public:
+  // Operation type reported by a KeyValue entry watcher.
+  enum class Operation {
+    Unknown,
+    Put,
+    Delete,
+    Purge,
+  };
+
   explicit KeyValueEntry(kvEntry *entry) : entry_(entry) {}
 
   ~KeyValueEntry() {
@@ -84,16 +84,16 @@ public:
   }
 
   [[nodiscard]]
-  kv_operation operation() const {
+  Operation operation() const {
     switch (kvEntry_Operation(entry_)) {
     case kvOp_Put:
-      return kv_operation::put;
+      return Operation::Put;
     case kvOp_Delete:
-      return kv_operation::del;
+      return Operation::Delete;
     case kvOp_Purge:
-      return kv_operation::purge;
+      return Operation::Purge;
     default:
-      return kv_operation::unknown;
+      return Operation::Unknown;
     }
   }
 

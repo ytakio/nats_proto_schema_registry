@@ -39,7 +39,8 @@
 
 namespace schemaregistry {
 
-using nats::kv_operation;
+using KeyValueEntry = nats::KeyValueEntry;
+using kvOp = nats::KeyValueEntry::Operation;
 using nats::make_nats_error;
 
 // Registry stores per-subject metadata and per-proto-file schema blobs in two
@@ -226,7 +227,7 @@ private:
       }
 
       const auto op = entry->operation();
-      if (op == kv_operation::del || op == kv_operation::purge) {
+      if (op == kvOp::Delete || op == kvOp::Purge) {
         continue;
       }
 

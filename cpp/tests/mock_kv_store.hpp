@@ -42,24 +42,24 @@
 
 namespace schemaregistry::testing {
 
-using nats::kv_operation;
+using kvOp = nats::KeyValueEntry::Operation;
 using nats::make_nats_error;
 
 class MockKeyValueEntry {
 public:
   MockKeyValueEntry(std::string key, std::vector<std::byte> value,
-                    kv_operation op = kv_operation::put)
+                    kvOp op = kvOp::Put)
       : key_(std::move(key)), value_(std::move(value)), operation_(op) {}
 
   [[nodiscard]] std::string_view key() const { return key_; }
   [[nodiscard]] std::span<const std::byte> value() const { return value_; }
   [[nodiscard]] std::uint64_t revision() const { return 1; }
-  [[nodiscard]] kv_operation operation() const { return operation_; }
+  [[nodiscard]] kvOp operation() const { return operation_; }
 
 private:
   std::string key_;
   std::vector<std::byte> value_;
-  kv_operation operation_;
+  kvOp operation_;
 };
 
 class MockKeyWatcher {
@@ -131,7 +131,7 @@ public:
   }
 
   void notify(std::string_view key, std::span<const std::byte> value,
-              kv_operation op = kv_operation::put) {
+              kvOp op = kvOp::Put) {
     {
       std::lock_guard<std::mutex> lock(mutex_);
       if (cancelled_) {
@@ -146,12 +146,12 @@ public:
 
   void notify_delete(std::string_view key) {
     std::vector<std::byte> empty;
-    notify(key, empty, kv_operation::del);
+    notify(key, empty, kvOp::Delete);
   }
 
   void notify_purge(std::string_view key) {
     std::vector<std::byte> empty;
-    notify(key, empty, kv_operation::purge);
+    notify(key, empty, kvOp::Purge);
   }
 
 private:
