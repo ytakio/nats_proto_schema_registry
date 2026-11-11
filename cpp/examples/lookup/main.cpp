@@ -32,8 +32,8 @@
 
 int main() {
   std::error_code conn_err;
-  auto conn = schemaregistry::nats::Connection::connect(
-      "nats://localhost:4444", conn_err);
+  auto conn = schemaregistry::nats::Connection::connect("nats://localhost:4444",
+                                                        conn_err);
   if (conn_err) {
     LOG_ERROR("connect: {}\n", conn_err.message());
     return EXIT_FAILURE;
@@ -47,7 +47,8 @@ int main() {
   }
 
   std::error_code reg_err;
-  auto reg = schemaregistry::create_registry(*js, "metadata", "schemas", reg_err);
+  auto reg =
+      schemaregistry::create_registry(*js, "metadata", "schemas", reg_err);
   if (reg_err) {
     LOG_ERROR("registry: {}\n", reg_err.message());
     return EXIT_FAILURE;
@@ -69,4 +70,3 @@ int main() {
 
   return EXIT_SUCCESS;
 }
-

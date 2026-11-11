@@ -41,13 +41,14 @@ using NatsRegistry = Registry<nats::KeyValue, nats::KeyValue>;
 [[nodiscard]] inline std::unique_ptr<NatsRegistry>
 create_registry(nats::JetStream &js, std::string_view metadata_bucket,
                 std::string_view schema_bucket, std::error_code &ec) {
+
   if (metadata_bucket.empty() || schema_bucket.empty()) {
     ec = make_nats_error(NATS_INVALID_ARG);
     return nullptr;
   }
 
-  auto get_or_create_kv = [&](std::string_view bucket)
-      -> std::unique_ptr<nats::KeyValue> {
+  auto get_or_create_kv =
+      [&](std::string_view bucket) -> std::unique_ptr<nats::KeyValue> {
     std::error_code kv_ec;
     auto kv = js.key_value(bucket, kv_ec);
     if (!kv_ec) {
@@ -82,4 +83,3 @@ create_registry(nats::JetStream &js, std::string_view metadata_bucket,
 }
 
 } // namespace schemaregistry
-

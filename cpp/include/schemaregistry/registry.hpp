@@ -56,17 +56,21 @@ using nats::make_nats_error;
 //   auto get(std::string_view key, std::error_code &ec)
 //       -> std::unique_ptr<Entry>;
 //   auto watch(std::string_view key, std::error_code &ec,
-//              std::chrono::milliseconds timeout)
+//              const WatchOptions &opts)
 //       -> std::unique_ptr<Watcher>;
 //   std::string_view bucket() const;
 //
-// Entry must provide:
+// The type returned by get() must provide:
 //   std::string_view key() const;
 //   std::span<const std::byte> value() const;
 //   kv_operation operation() const;
 //
+// WatchOptions is implementation-defined; the registry passes
+// WatchOptions with IgnoreDeletes set to true.
+//
 // Watcher must provide:
-//   auto next(std::stop_token, std::error_code&) -> std::unique_ptr<Entry>;
+//   auto next(std::stop_token, std::error_code&)
+//       -> std::unique_ptr<decltype(*get(...))>;
 //   void stop();
 template <typename MetadataKV, typename SchemaKV> class Registry {
 public:
@@ -104,7 +108,7 @@ public:
       return make_nats_error(NATS_ERR);
     }
 
-    FileDescriptorSet fds = build_file_descriptor_set_(file);
+    FileDescriptorSet fds = build_file_descriptor_set(file);
 
     std::string schema_bytes;
     if (!fds.SerializeToString(&schema_bytes)) {
@@ -194,32 +198,31 @@ private:
   // Deleted or purged entries are ignored so that callers wait for a real
   // value. Returns an error if the watcher fails or cancellation is requested.
   template <typename KV>
-  [[nodiscard]] static auto watch_key(std::stop_token stop_token, KV &kv,
-                                      std::string_view key,
-                                      std::error_code &ec) {
+  [[nodiscard]]
+  static auto watch_key(std::stop_token stop_token, KV &kv,
+                        std::string_view key, std::error_code &ec)
+      -> decltype(kv.get(key, ec)) {
     if (stop_token.stop_requested()) {
       ec = make_nats_error(NATS_TIMEOUT);
-      return decltype(kv.get(key, ec)){};
+      return nullptr;
     }
 
-    auto watcher = kv.watch(key, ec);
+    typename KV::WatchOptions opts;
+    opts.IgnoreDeletes = true;
+    auto watcher = kv.watch(key, ec, opts);
     if (ec) {
-      return decltype(kv.get(key, ec)){};
-    }
-    if (!watcher) {
-      ec = make_nats_error(NATS_ERR);
-      return decltype(kv.get(key, ec)){};
+      return nullptr;
     }
 
     for (;;) {
       if (stop_token.stop_requested()) {
         ec = make_nats_error(NATS_TIMEOUT);
-        return decltype(kv.get(key, ec)){};
+        return nullptr;
       }
 
       auto entry = watcher->next(stop_token, ec);
       if (ec) {
-        return decltype(kv.get(key, ec)){};
+        return nullptr;
       }
       if (!entry) {
         // Initial-state marker or timeout with no update; keep waiting.
@@ -227,6 +230,7 @@ private:
       }
 
       const auto op = entry->operation();
+      // Just in case
       if (op == kvOp::Delete || op == kvOp::Purge) {
         continue;
       }
@@ -238,8 +242,9 @@ private:
   // Walks from the file descriptor through all transitive imports, producing
   // a FileDescriptorSet. The resulting files are ordered so that dependencies
   // appear before the files that import them.
-  [[nodiscard]] static FileDescriptorSet
-  build_file_descriptor_set_(const FileDescriptor *file) {
+  [[nodiscard]]
+  static FileDescriptorSet
+  build_file_descriptor_set(const FileDescriptor *file) {
     FileDescriptorSet fds;
     std::unordered_set<std::string_view> seen;
 

@@ -175,6 +175,8 @@ private:
 
 class MockKeyValue {
 public:
+  using WatchOptions = nats::KeyValue::WatchOptions;
+
   MockKeyValue() = default;
 
   [[nodiscard]] std::error_code put(std::string_view key,
@@ -219,9 +221,9 @@ public:
     return std::make_unique<MockKeyValueEntry>(std::string(key), it->second);
   }
 
-  [[nodiscard]] std::unique_ptr<MockKeyWatcher> watch(
-      std::string_view key, std::error_code &ec,
-      std::chrono::milliseconds /*timeout*/ = std::chrono::milliseconds{1000}) {
+  [[nodiscard]] std::unique_ptr<MockKeyWatcher>
+  watch(std::string_view key, std::error_code &ec,
+        const WatchOptions & /*opts*/ = {}) {
     ec = {};
     return std::make_unique<MockKeyWatcher>(std::string(key), data_, mutex_,
                                             watchers_);
