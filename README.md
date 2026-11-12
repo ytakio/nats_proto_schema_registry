@@ -39,6 +39,7 @@ message type.
 
 ## Implementations
 
+- [C++](./cpp) - C++20 header-only library with NATS KV backend.
 - [Go](./go) - Go library with NATS KV backend.
 - [Python](./python) - Python library with NATS KV backend (requires Python 3.14+).
 
