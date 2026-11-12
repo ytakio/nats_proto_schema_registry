@@ -23,13 +23,8 @@
 #include "schemaregistry/error.hpp"
 #include "schemaregistry/nats/jetstream.hpp"
 #include "schemaregistry/nats/kv.hpp"
+#include "schemaregistry/nats_kv_adapter.hpp"
 #include "schemaregistry/registry.hpp"
-
-#if __has_include(<nats/nats.h>)
-#include <nats/nats.h>
-#else
-#include <nats.h>
-#endif
 
 #include <memory>
 #include <string_view>
@@ -38,12 +33,14 @@
 namespace schemaregistry {
 
 // Registry backed by NATS JetStream KeyValue buckets.
-using NatsRegistry = Registry<nats::KeyValue, nats::KeyValue>;
+using NatsRegistry = Registry<NatsKeyValueAdapter, NatsKeyValueAdapter>;
 
-// Create a Registry backed by NATS KV buckets. If the buckets do not exist they
-// are created with default settings. The JetStream context must outlive the
-// returned registry. On failure ec is set and nullptr is returned.
-[[nodiscard]] inline std::unique_ptr<NatsRegistry>
+// Create a Registry backed by NATS JetStream KeyValue buckets. If the buckets
+// do not exist they are created with default settings. The JetStream context
+// must outlive the returned registry. On failure ec is set and nullptr is
+// returned.
+[[nodiscard]]
+inline std::unique_ptr<NatsRegistry>
 create_registry(nats::JetStream &js, std::string_view metadata_bucket,
                 std::string_view schema_bucket, std::error_code &ec) {
 
@@ -83,8 +80,9 @@ create_registry(nats::JetStream &js, std::string_view metadata_bucket,
   }
 
   ec = {};
-  return std::make_unique<NatsRegistry>(std::move(metadata_kv),
-                                        std::move(schema_kv));
+  return std::make_unique<NatsRegistry>(
+      std::make_unique<NatsKeyValueAdapter>(std::move(metadata_kv)),
+      std::make_unique<NatsKeyValueAdapter>(std::move(schema_kv)));
 }
 
 } // namespace schemaregistry

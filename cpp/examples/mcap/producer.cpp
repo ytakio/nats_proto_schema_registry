@@ -25,6 +25,7 @@
 #include <google/protobuf/type.pb.h>
 
 #include <atomic>
+#include <chrono>
 #include <csignal>
 #include <cstdlib>
 #include <format>

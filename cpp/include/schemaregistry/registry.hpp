@@ -21,7 +21,6 @@
 #pragma once
 
 #include "schemaregistry/error.hpp"
-#include "schemaregistry/nats/kv.hpp"
 #include "schemaregistry/types.hpp"
 
 #include <google/protobuf/descriptor.pb.h>
@@ -30,6 +29,7 @@
 #include <glaze/glaze.hpp>
 
 #include <memory>
+#include <span>
 #include <stop_token>
 #include <string>
 #include <string_view>
@@ -38,38 +38,21 @@
 
 namespace schemaregistry {
 
-using KeyValueEntry = nats::KeyValueEntry;
-using kvOp = nats::KeyValueEntry::Operation;
-
 // Registry stores per-subject metadata and per-proto-file schema blobs in two
 // KeyValue backends. It is header-only and does not throw exceptions; all
 // errors are reported through std::error_code.
 //
-// MetadataKV and SchemaKV are duck-typed. They must provide:
+// MetadataKV and SchemaKV must provide:
+//   - std::error_code put(std::string_view key,
+//                         std::string_view value,
+//                         std::uint64_t &rev)
+//   - std::vector<std::byte> get(std::string_view key,
+//                                std::stop_token stop_token,
+//                                std::error_code &ec)
 //
-//   std::error_code put(std::string_view key, std::span<const std::byte> value,
-//                       std::uint64_t &rev);
-//   std::error_code put(std::string_view key, std::string_view value,
-//                       std::uint64_t &rev);
-//   auto get(std::string_view key, std::error_code &ec)
-//       -> std::unique_ptr<Entry>;
-//   auto watch(std::string_view key, std::error_code &ec,
-//              const WatchOptions &opts)
-//       -> std::unique_ptr<Watcher>;
-//   std::string_view bucket() const;
-//
-// The type returned by get() must provide:
-//   std::string_view key() const;
-//   std::span<const std::byte> value() const;
-//   kv_operation operation() const;
-//
-// WatchOptions is implementation-defined; the registry passes
-// WatchOptions with IgnoreDeletes set to true.
-//
-// Watcher must provide:
-//   auto next(std::stop_token, std::error_code&)
-//       -> std::unique_ptr<decltype(*get(...))>;
-//   void stop();
+// Templating allows callers to instantiate the registry with concrete adapter
+// types (e.g. the NATS adapter in production or MockKeyValue in tests) without
+// virtual dispatch overhead.
 template <typename MetadataKV, typename SchemaKV> class Registry {
 public:
   using FileDescriptorSet = google::protobuf::FileDescriptorSet;
@@ -140,9 +123,9 @@ public:
   }
 
   // Pull returns the FileDescriptorSet for the protobuf message registered
-  // under the given NATS subject. The metadata is written to meta. It watches
-  // the registry buckets and blocks until the subject is registered or
-  // cancellation is requested. Returns nullptr and sets ec on failure.
+  // under the given NATS subject. The metadata is written to meta. It blocks
+  // until the subject is registered or cancellation is requested. Returns
+  // nullptr and sets ec on failure.
   [[nodiscard]] std::unique_ptr<FileDescriptorSet>
   pull(std::stop_token stop_token, std::string_view subject, Metadata &meta,
        std::error_code &ec) {
@@ -156,33 +139,31 @@ public:
       return nullptr;
     }
 
-    auto meta_entry = watch_key(stop_token, *metadata_kv_, subject, ec);
+    const auto meta_bytes = metadata_kv_->get(subject, stop_token, ec);
     if (ec) {
       return nullptr;
     }
 
     Metadata parsed_meta{};
     {
-      const auto raw = meta_entry->value();
-      const std::string json_str(reinterpret_cast<const char *>(raw.data()),
-                                 raw.size());
+      const auto raw = reinterpret_cast<const char *>(meta_bytes.data());
+      const std::string json_str(raw, meta_bytes.size());
       if (auto err = glz::read_json(parsed_meta, json_str); err) {
         ec = make_error_code(registry_errc::parse_failed);
         return nullptr;
       }
     }
 
-    auto schema_entry =
-        watch_key(stop_token, *schema_kv_, parsed_meta.schema.path, ec);
+    const auto schema_bytes =
+        schema_kv_->get(parsed_meta.schema.path, stop_token, ec);
     if (ec) {
       return nullptr;
     }
 
     auto fds = std::make_unique<FileDescriptorSet>();
     {
-      const auto raw = schema_entry->value();
-      const std::string fds_bytes(reinterpret_cast<const char *>(raw.data()),
-                                  raw.size());
+      const auto raw = reinterpret_cast<const char *>(schema_bytes.data());
+      const std::string fds_bytes(raw, schema_bytes.size());
       if (!fds->ParseFromString(fds_bytes)) {
         ec = make_error_code(registry_errc::parse_failed);
         return nullptr;
@@ -195,51 +176,6 @@ public:
   }
 
 private:
-  // Watch a key in a KeyValue store until a real value is available.
-  // Deleted or purged entries are ignored so that callers wait for a real
-  // value. Returns an error if the watcher fails or cancellation is requested.
-  template <typename KV>
-  [[nodiscard]]
-  static auto watch_key(std::stop_token stop_token, KV &kv,
-                        std::string_view key, std::error_code &ec)
-      -> decltype(kv.get(key, std::declval<std::error_code &>())) {
-    if (stop_token.stop_requested()) {
-      ec = make_error_code(registry_errc::cancelled);
-      return nullptr;
-    }
-
-    typename KV::WatchOptions opts;
-    opts.IgnoreDeletes = true;
-    auto watcher = kv.watch(key, ec, opts);
-    if (ec) {
-      return nullptr;
-    }
-
-    for (;;) {
-      if (stop_token.stop_requested()) {
-        ec = make_error_code(registry_errc::cancelled);
-        return nullptr;
-      }
-
-      auto entry = watcher->next(stop_token, ec);
-      if (ec) {
-        return nullptr;
-      }
-      if (!entry) {
-        // Initial-state marker or timeout with no update; keep waiting.
-        continue;
-      }
-
-      const auto op = entry->operation();
-      // Just in case
-      if (op == kvOp::Delete || op == kvOp::Purge) {
-        continue;
-      }
-
-      return entry;
-    }
-  }
-
   // Walks from the file descriptor through all transitive imports, producing
   // a FileDescriptorSet. The resulting files are ordered so that dependencies
   // appear before the files that import them.

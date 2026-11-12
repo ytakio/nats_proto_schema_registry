@@ -130,16 +130,23 @@ std::cout << fds->file_size() << std::endl; // count of files
 
 ## API
 
-The main entry point is the `NatsRegistry` class in `registry.hpp`:
+The main entry point is the `create_registry()` factory in
+`nats_registry.hpp`:
 
 - `push(stop_token, subject, msg)` - register a generated protobuf message.
   Returns `std::error_code` directly because there is no value payload,
   mirroring Go's `error` return idiom.
 - `pull(stop_token, subject, meta, ec)` - retrieve the `FileDescriptorSet` and
-  `Metadata`. `pull` watches the metadata and schema buckets, so it blocks until
+  `Metadata`. `pull` watches the registry buckets, so it blocks until
   the requested subject is registered or cancellation is requested. The
   `FileDescriptorSet` is returned as `std::unique_ptr<FileDescriptorSet>`, and
   the metadata is written to the `meta` output parameter.
+
+`Registry<MetadataKV, SchemaKV>` in `registry.hpp` is a template class
+parameterized by two `BlockingKeyValue` backends. The NATS-specific adapter is
+`NatsKeyValueAdapter` in `nats_kv_adapter.hpp`, which wraps `nats::KeyValue` and
+hides the watch/retry logic. Most clients should use `create_registry()` rather
+than constructing `Registry` directly.
 
 Errors are reported through `std::error_code`. Check the returned `std::error_code`
 argument to detect failures.

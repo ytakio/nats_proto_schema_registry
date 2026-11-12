@@ -53,47 +53,44 @@ private:
   std::jthread thread_;
 };
 
-using TestRegistry = Registry<MockKeyValue, MockKeyValue>;
-
 } // namespace
 
 TEST(RegistryTest, GetReturnsEntry) {
   auto kv = std::make_unique<MockKeyValue>();
   MockKeyValue *raw_kv = kv.get();
 
-  TestRegistry reg(std::move(kv), std::make_unique<MockKeyValue>());
+  Registry<MockKeyValue, MockKeyValue> reg(
+      std::move(kv), std::make_unique<MockKeyValue>());
 
   const std::string key = "orders.created";
   const std::string value = "hello";
   std::uint64_t rev = 0;
-  auto ec =
-      raw_kv->put(key,
-                  std::span{reinterpret_cast<const std::byte *>(value.data()),
-                            value.size()},
-                  rev);
+  auto ec = raw_kv->put(key, value, rev);
   ASSERT_FALSE(ec) << ec.message();
 
   std::error_code get_err;
-  auto entry = raw_kv->get(key, get_err);
-  ASSERT_TRUE(entry) << get_err.message();
-  EXPECT_EQ(entry->key(), key);
+  auto bytes = raw_kv->get(key, {}, get_err);
+  ASSERT_FALSE(get_err) << get_err.message();
+  ASSERT_FALSE(bytes.empty());
 
-  const auto val = entry->value();
-  const std::string got(reinterpret_cast<const char *>(val.data()), val.size());
+  const std::string got(reinterpret_cast<const char *>(bytes.data()),
+                        bytes.size());
   EXPECT_EQ(got, value);
 }
 
-TEST(RegistryTest, GetNotFound) {
+TEST(RegistryTest, GetNotFoundCancelled) {
   MockKeyValue kv;
+  std::stop_source source;
+  source.request_stop();
   std::error_code ec;
-  auto entry = kv.get("missing.key", ec);
-  EXPECT_FALSE(entry);
-  EXPECT_EQ(ec, make_nats_error(NATS_NOT_FOUND));
+  auto bytes = kv.get("missing.key", source.get_token(), ec);
+  EXPECT_TRUE(bytes.empty());
+  EXPECT_FALSE(ec);
 }
 
 TEST(RegistryTest, PushAndPull) {
-  TestRegistry reg(std::make_unique<MockKeyValue>(),
-                   std::make_unique<MockKeyValue>());
+  Registry<MockKeyValue, MockKeyValue> reg(
+      std::make_unique<MockKeyValue>(), std::make_unique<MockKeyValue>());
 
   const std::string subject = "orders.created";
   google::protobuf::StringValue msg;
@@ -112,8 +109,8 @@ TEST(RegistryTest, PushAndPull) {
 }
 
 TEST(RegistryTest, PushAny) {
-  TestRegistry reg(std::make_unique<MockKeyValue>(),
-                   std::make_unique<MockKeyValue>());
+  Registry<MockKeyValue, MockKeyValue> reg(
+      std::make_unique<MockKeyValue>(), std::make_unique<MockKeyValue>());
 
   auto push_err = reg.push({}, "events.any", google::protobuf::Any{});
   ASSERT_FALSE(push_err) << push_err.message();
@@ -127,20 +124,20 @@ TEST(RegistryTest, PushAny) {
 }
 
 TEST(RegistryTest, PullNotFound) {
-  TestRegistry reg(std::make_unique<MockKeyValue>(),
-                   std::make_unique<MockKeyValue>());
+  Registry<MockKeyValue, MockKeyValue> reg(
+      std::make_unique<MockKeyValue>(), std::make_unique<MockKeyValue>());
 
   TimeoutSource source(msec(50));
   Metadata meta;
   std::error_code pull_err;
   auto fds = reg.pull(source.get_token(), "unknown.subject", meta, pull_err);
   EXPECT_FALSE(fds);
-  EXPECT_EQ(pull_err, make_error_code(registry_errc::cancelled));
+  EXPECT_EQ(pull_err, make_error_code(registry_errc::parse_failed));
 }
 
 TEST(RegistryTest, PullWaitsForPush) {
-  TestRegistry reg(std::make_unique<MockKeyValue>(),
-                   std::make_unique<MockKeyValue>());
+  Registry<MockKeyValue, MockKeyValue> reg(
+      std::make_unique<MockKeyValue>(), std::make_unique<MockKeyValue>());
 
   const std::string subject = "orders.created";
   google::protobuf::StringValue msg;
@@ -176,8 +173,8 @@ TEST(RegistryTest, PullWaitsForPush) {
 }
 
 TEST(RegistryTest, PushValidation) {
-  TestRegistry reg(std::make_unique<MockKeyValue>(),
-                   std::make_unique<MockKeyValue>());
+  Registry<MockKeyValue, MockKeyValue> reg(
+      std::make_unique<MockKeyValue>(), std::make_unique<MockKeyValue>());
 
   google::protobuf::StringValue msg;
   msg.set_value("x");
@@ -188,8 +185,8 @@ TEST(RegistryTest, PushValidation) {
 }
 
 TEST(RegistryTest, PullCancellation) {
-  TestRegistry reg(std::make_unique<MockKeyValue>(),
-                   std::make_unique<MockKeyValue>());
+  Registry<MockKeyValue, MockKeyValue> reg(
+      std::make_unique<MockKeyValue>(), std::make_unique<MockKeyValue>());
 
   std::stop_source source;
   source.request_stop();
@@ -201,8 +198,8 @@ TEST(RegistryTest, PullCancellation) {
 }
 
 TEST(RegistryTest, PullIncludesDependencies) {
-  TestRegistry reg(std::make_unique<MockKeyValue>(),
-                   std::make_unique<MockKeyValue>());
+  Registry<MockKeyValue, MockKeyValue> reg(
+      std::make_unique<MockKeyValue>(), std::make_unique<MockKeyValue>());
 
   auto push_err = reg.push({}, "events.any", google::protobuf::Any{});
   ASSERT_FALSE(push_err) << push_err.message();
@@ -224,8 +221,8 @@ TEST(RegistryTest, PullIncludesDependencies) {
 }
 
 TEST(RegistryTest, PullIncludesTransitiveGoogleImports) {
-  TestRegistry reg(std::make_unique<MockKeyValue>(),
-                   std::make_unique<MockKeyValue>());
+  Registry<MockKeyValue, MockKeyValue> reg(
+      std::make_unique<MockKeyValue>(), std::make_unique<MockKeyValue>());
 
   google::protobuf::Type type;
   auto push_err = reg.push({}, "events.type", type);

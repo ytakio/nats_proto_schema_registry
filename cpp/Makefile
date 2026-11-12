@@ -14,12 +14,12 @@ build:
 test:
 	$(CMAKE) -S . -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Release
 	$(CMAKE) --build $(BUILD_DIR) --target registry_test
-	cd $(BUILD_DIR) && ctest -R registry_test --output-on-failure
+	cd $(BUILD_DIR) && ctest -R registry_test --output-on-failure --timeout 30
 
 test-race:
 	$(CMAKE) -S . -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-fsanitize=thread -fno-omit-frame-pointer"
 	$(CMAKE) --build $(BUILD_DIR) --target registry_test
-	cd $(BUILD_DIR) && ctest -R registry_test --output-on-failure
+	cd $(BUILD_DIR) && ctest -R registry_test --output-on-failure --timeout 30
 
 check: test-race
 

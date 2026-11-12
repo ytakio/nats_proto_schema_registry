@@ -190,15 +190,6 @@ public:
   }
 
   [[nodiscard]]
-  std::error_code put(std::string_view key, std::string_view value,
-                      std::uint64_t &rev) {
-    return put(key,
-               std::span{reinterpret_cast<const std::byte *>(value.data()),
-                         value.size()},
-               rev);
-  }
-
-  [[nodiscard]]
   std::unique_ptr<KeyValueEntry> get(std::string_view key,
                                      std::error_code &ec) {
     kvEntry *kv_entry;

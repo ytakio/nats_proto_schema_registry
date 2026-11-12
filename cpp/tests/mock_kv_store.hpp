@@ -179,12 +179,14 @@ public:
   MockKeyValue() = default;
 
   [[nodiscard]] std::error_code put(std::string_view key,
-                                    std::span<const std::byte> value,
+                                    std::string_view value,
                                     std::uint64_t &rev) {
+    const std::span<const std::byte> bytes{
+        reinterpret_cast<const std::byte *>(value.data()), value.size()};
     std::vector<MockKeyWatcher *> watchers_copy;
     {
       std::lock_guard<std::mutex> lock(mutex_);
-      std::vector<std::byte> copy(value.begin(), value.end());
+      std::vector<std::byte> copy(bytes.begin(), bytes.end());
       data_[std::string(key)] = std::move(copy);
 
       auto it = watchers_.find(std::string(key));
@@ -194,20 +196,64 @@ public:
     }
 
     for (auto *watcher : watchers_copy) {
-      watcher->notify(key, value);
+      watcher->notify(key, bytes);
     }
     rev = std::uint64_t{1};
     return {};
   }
 
-  [[nodiscard]] std::error_code
-  put(std::string_view key, std::string_view value, std::uint64_t &rev) {
-    return put(key,
-               std::span{reinterpret_cast<const std::byte *>(value.data()),
-                         value.size()},
-               rev);
+  [[nodiscard]] std::vector<std::byte>
+  get(std::string_view key, std::stop_token stop_token,
+      std::error_code &ec) {
+    if (stop_token.stop_requested()) {
+      ec = {};
+      return {};
+    }
+
+    auto entry = get(key, ec);
+    if (ec) {
+      if (ec.value() != NATS_NOT_FOUND) {
+        return {};
+      }
+      ec = {};
+    }
+    if (entry) {
+      const auto val = entry->value();
+      return std::vector<std::byte>(val.begin(), val.end());
+    }
+
+    auto watcher = watch(key, ec);
+    if (ec) {
+      return {};
+    }
+
+    for (;;) {
+      if (stop_token.stop_requested()) {
+        ec = {};
+        return {};
+      }
+
+      entry = watcher->next(stop_token, ec);
+      if (ec) {
+        return {};
+      }
+      if (!entry) {
+        continue;
+      }
+
+      const auto op = entry->operation();
+      if (op == kvOp::Delete || op == kvOp::Purge) {
+        continue;
+      }
+
+      const auto val = entry->value();
+      return std::vector<std::byte>(val.begin(), val.end());
+    }
   }
 
+  [[nodiscard]] std::string_view bucket() const { return "mock"; }
+
+private:
   [[nodiscard]] std::unique_ptr<MockKeyValueEntry> get(std::string_view key,
                                                        std::error_code &ec) {
     std::lock_guard<std::mutex> lock(mutex_);
@@ -228,9 +274,6 @@ public:
                                             watchers_);
   }
 
-  [[nodiscard]] std::string_view bucket() const { return "mock"; }
-
-private:
   mutable std::mutex mutex_;
   std::map<std::string, std::vector<std::byte>> data_;
   std::map<std::string, std::vector<MockKeyWatcher *>> watchers_;
