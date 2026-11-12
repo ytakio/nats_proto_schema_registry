@@ -20,13 +20,18 @@
 
 #pragma once
 
-#include "schemaregistry/nats/error.hpp"
+#include "schemaregistry/error.hpp"
 #include "schemaregistry/nats/jetstream.hpp"
 #include "schemaregistry/nats/kv.hpp"
 #include "schemaregistry/registry.hpp"
 
+#if __has_include(<nats/nats.h>)
+#include <nats/nats.h>
+#else
+#include <nats.h>
+#endif
+
 #include <memory>
-#include <string>
 #include <string_view>
 #include <system_error>
 
@@ -43,7 +48,7 @@ create_registry(nats::JetStream &js, std::string_view metadata_bucket,
                 std::string_view schema_bucket, std::error_code &ec) {
 
   if (metadata_bucket.empty() || schema_bucket.empty()) {
-    ec = make_nats_error(NATS_INVALID_ARG);
+    ec = make_error_code(registry_errc::invalid_argument);
     return nullptr;
   }
 

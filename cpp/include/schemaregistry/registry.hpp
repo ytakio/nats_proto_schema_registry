@@ -20,7 +20,7 @@
 
 #pragma once
 
-#include "schemaregistry/nats/error.hpp"
+#include "schemaregistry/error.hpp"
 #include "schemaregistry/nats/kv.hpp"
 #include "schemaregistry/types.hpp"
 
@@ -30,7 +30,6 @@
 #include <glaze/glaze.hpp>
 
 #include <memory>
-#include <span>
 #include <stop_token>
 #include <string>
 #include <string_view>
@@ -41,7 +40,6 @@ namespace schemaregistry {
 
 using KeyValueEntry = nats::KeyValueEntry;
 using kvOp = nats::KeyValueEntry::Operation;
-using nats::make_nats_error;
 
 // Registry stores per-subject metadata and per-proto-file schema blobs in two
 // KeyValue backends. It is header-only and does not throw exceptions; all
@@ -92,27 +90,27 @@ public:
                                      const Message &msg) {
 
     if (stop_token.stop_requested()) {
-      return make_nats_error(NATS_TIMEOUT);
+      return make_error_code(registry_errc::cancelled);
     }
     if (subject.empty()) {
-      return make_nats_error(NATS_INVALID_ARG);
+      return make_error_code(registry_errc::invalid_argument);
     }
 
     const Descriptor *descriptor = msg.GetDescriptor();
     if (descriptor == nullptr) {
-      return make_nats_error(NATS_INVALID_ARG);
+      return make_error_code(registry_errc::invalid_argument);
     }
 
     const FileDescriptor *file = descriptor->file();
     if (file == nullptr) {
-      return make_nats_error(NATS_ERR);
+      return make_error_code(registry_errc::internal_error);
     }
 
     FileDescriptorSet fds = build_file_descriptor_set(file);
 
     std::string schema_bytes;
     if (!fds.SerializeToString(&schema_bytes)) {
-      return make_nats_error(NATS_ERR);
+      return make_error_code(registry_errc::serialization_failed);
     }
 
     Metadata metadata;
@@ -121,7 +119,7 @@ public:
 
     std::string metadata_json;
     if (auto err = glz::write_json(metadata, metadata_json); err) {
-      return make_nats_error(NATS_ERR);
+      return make_error_code(registry_errc::serialization_failed);
     }
 
     const std::string_view path = metadata.schema.path;
@@ -135,7 +133,10 @@ public:
     }
 
     ec = metadata_kv_->put(subject, metadata_json, rev);
-    return ec;
+    if (ec) {
+      return ec;
+    }
+    return {};
   }
 
   // Pull returns the FileDescriptorSet for the protobuf message registered
@@ -147,11 +148,11 @@ public:
        std::error_code &ec) {
 
     if (stop_token.stop_requested()) {
-      ec = make_nats_error(NATS_TIMEOUT);
+      ec = make_error_code(registry_errc::cancelled);
       return nullptr;
     }
     if (subject.empty()) {
-      ec = make_nats_error(NATS_INVALID_ARG);
+      ec = make_error_code(registry_errc::invalid_argument);
       return nullptr;
     }
 
@@ -166,7 +167,7 @@ public:
       const std::string json_str(reinterpret_cast<const char *>(raw.data()),
                                  raw.size());
       if (auto err = glz::read_json(parsed_meta, json_str); err) {
-        ec = make_nats_error(NATS_ERR);
+        ec = make_error_code(registry_errc::parse_failed);
         return nullptr;
       }
     }
@@ -183,7 +184,7 @@ public:
       const std::string fds_bytes(reinterpret_cast<const char *>(raw.data()),
                                   raw.size());
       if (!fds->ParseFromString(fds_bytes)) {
-        ec = make_nats_error(NATS_ERR);
+        ec = make_error_code(registry_errc::parse_failed);
         return nullptr;
       }
     }
@@ -201,9 +202,9 @@ private:
   [[nodiscard]]
   static auto watch_key(std::stop_token stop_token, KV &kv,
                         std::string_view key, std::error_code &ec)
-      -> decltype(kv.get(key, ec)) {
+      -> decltype(kv.get(key, std::declval<std::error_code &>())) {
     if (stop_token.stop_requested()) {
-      ec = make_nats_error(NATS_TIMEOUT);
+      ec = make_error_code(registry_errc::cancelled);
       return nullptr;
     }
 
@@ -216,7 +217,7 @@ private:
 
     for (;;) {
       if (stop_token.stop_requested()) {
-        ec = make_nats_error(NATS_TIMEOUT);
+        ec = make_error_code(registry_errc::cancelled);
         return nullptr;
       }
 

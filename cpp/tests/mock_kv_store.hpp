@@ -24,7 +24,6 @@
 #include "schemaregistry/nats/kv.hpp"
 
 #include <algorithm>
-#include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
@@ -106,7 +105,7 @@ public:
     }
 
     if (cancelled_) {
-      ec = make_nats_error(NATS_TIMEOUT);
+      ec = {};
       return nullptr;
     }
 

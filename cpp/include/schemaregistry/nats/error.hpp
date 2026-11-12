@@ -31,27 +31,19 @@
 
 namespace schemaregistry::nats {
 
-class error_category : public std::error_category {
-public:
-  const char *name() const noexcept override {
-    return "nats";
-  }
-
-  std::string message(int ev) const override {
-    return natsStatus_GetText(static_cast<natsStatus>(ev));
-  }
-};
-
-inline const std::error_category &category() {
-  static const error_category instance;
-  return instance;
-}
-
 inline std::error_code make_nats_error(natsStatus s) {
+  static const struct : std::error_category {
+    const char *name() const noexcept override { return "nats"; }
+
+    std::string message(int ev) const override {
+      return natsStatus_GetText(static_cast<natsStatus>(ev));
+    }
+  } category;
+
   if (s == NATS_OK) {
     return {};
   }
-  return {static_cast<int>(s), category()};
+  return {static_cast<int>(s), category};
 }
 
 } // namespace schemaregistry::nats

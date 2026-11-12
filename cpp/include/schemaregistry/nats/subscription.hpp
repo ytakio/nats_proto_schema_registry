@@ -20,12 +20,10 @@
 
 #pragma once
 
-#include "schemaregistry/nats/error.hpp"
 #include "schemaregistry/nats/message.hpp"
 
 #include <functional>
 #include <memory>
-#include <system_error>
 
 namespace schemaregistry::nats {
 

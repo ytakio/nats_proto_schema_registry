@@ -19,7 +19,6 @@
 // SOFTWARE.
 
 #include "mock_kv_store.hpp"
-#include "schemaregistry/nats/error.hpp"
 #include "schemaregistry/registry.hpp"
 
 #include <google/protobuf/any.pb.h>
@@ -33,7 +32,6 @@
 #include <thread>
 
 using namespace schemaregistry;
-using namespace schemaregistry::nats;
 using namespace schemaregistry::testing;
 
 namespace {
@@ -137,7 +135,7 @@ TEST(RegistryTest, PullNotFound) {
   std::error_code pull_err;
   auto fds = reg.pull(source.get_token(), "unknown.subject", meta, pull_err);
   EXPECT_FALSE(fds);
-  EXPECT_EQ(pull_err, make_nats_error(NATS_TIMEOUT));
+  EXPECT_EQ(pull_err, make_error_code(registry_errc::cancelled));
 }
 
 TEST(RegistryTest, PullWaitsForPush) {
@@ -186,7 +184,7 @@ TEST(RegistryTest, PushValidation) {
 
   auto push_err = reg.push({}, "", msg);
   EXPECT_TRUE(push_err);
-  EXPECT_EQ(push_err, make_nats_error(NATS_INVALID_ARG));
+  EXPECT_EQ(push_err, make_error_code(registry_errc::invalid_argument));
 }
 
 TEST(RegistryTest, PullCancellation) {
@@ -199,7 +197,7 @@ TEST(RegistryTest, PullCancellation) {
   std::error_code pull_err;
   auto fds = reg.pull(source.get_token(), "cancelled.subject", meta, pull_err);
   EXPECT_FALSE(fds);
-  EXPECT_EQ(pull_err, make_nats_error(NATS_TIMEOUT));
+  EXPECT_EQ(pull_err, make_error_code(registry_errc::cancelled));
 }
 
 TEST(RegistryTest, PullIncludesDependencies) {
