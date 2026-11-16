@@ -96,7 +96,7 @@ are already present.
 ## Development
 
 ```bash
-make build       # go build ./...
+make build       # go build -o bin/ ./...
 make test        # go test ./...
 make test-race   # go test -race ./...
 make vet         # go vet ./...
@@ -106,6 +106,9 @@ make proto       # regenerate the protobuf code used by the mcap example
 make up          # start NATS with JetStream (docker compose)
 make run-mcap-example
 ```
+
+Build artifacts are written to `go/bin/` (overridable with `make build BIN_DIR=<dir>`);
+`make clean` removes that directory.
 
 ## Storage layout
 

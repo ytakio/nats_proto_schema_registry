@@ -1,11 +1,14 @@
+# All build artifacts are written under $(BIN_DIR).
+BIN_DIR ?= bin
+
 .PHONY: build build-example-mcap test test-race vet fmt lint check clean proto up down run-mcap-example
 
 build:
-	go build ./...
+	go build -o $(BIN_DIR)/ ./...
 
 build-example-mcap:
-	go build -o recorder ./example/mcap/cmd/recorder
-	go build -o producer ./example/mcap/cmd/producer
+	go build -o $(BIN_DIR)/recorder ./example/mcap/cmd/recorder
+	go build -o $(BIN_DIR)/producer ./example/mcap/cmd/producer
 
 test:
 	go test ./...
@@ -24,6 +27,7 @@ lint: fmt vet
 check: lint test-race
 
 clean:
+	rm -rf $(BIN_DIR)
 	rm -f coverage.out *.mcap
 
 PROTOC ?= protoc
@@ -43,13 +47,12 @@ down:
 
 run-mcap-example: build-example-mcap
 	$(COMPOSE) -f $(COMPOSE_FILE) up -d
-	./recorder & RECORDER_PID=$$!; \
+	$(BIN_DIR)/recorder & RECORDER_PID=$$!; \
 	sleep 2; \
-	./producer & PRODUCER_PID=$$!; \
+	$(BIN_DIR)/producer & PRODUCER_PID=$$!; \
 	sleep 10; \
 	kill -s INT $$RECORDER_PID; \
 	kill -s INT $$PRODUCER_PID; \
 	wait $$RECORDER_PID; \
 	wait $$PRODUCER_PID; \
-	rm -f recorder producer; \
 	$(COMPOSE) -f $(COMPOSE_FILE) down --remove-orphans 

@@ -8,8 +8,7 @@ __pycache__/
 uv.lock
 
 # Example binaries
-recorder
-producer
+bin/
 
 # C++ build directory
 build/
