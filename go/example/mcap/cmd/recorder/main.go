@@ -106,14 +106,30 @@ func main() {
 		log.Fatalf("write schema: %v", err)
 	}
 
-	channel := &mcap.Channel{
-		ID:              0,
-		SchemaID:        schema.ID,
-		Topic:           *subject,
-		MessageEncoding: "protobuf",
-	}
-	if err := writer.WriteChannel(channel); err != nil {
-		log.Fatalf("write channel: %v", err)
+	// Map each concrete NATS subject to an MCAP channel. When the recorder is
+	// subscribed to a wildcard, messages can arrive on different subjects and
+	// must be written to the channel whose topic matches the actual subject.
+	channelIDs := make(map[string]uint16)
+	var nextChannelID uint16
+
+	getChannelID := func(subject string) (uint16, error) {
+		if id, ok := channelIDs[subject]; ok {
+			return id, nil
+		}
+
+		id := nextChannelID
+		nextChannelID++
+		channel := &mcap.Channel{
+			ID:              id,
+			SchemaID:        schema.ID,
+			Topic:           subject,
+			MessageEncoding: "protobuf",
+		}
+		if err := writer.WriteChannel(channel); err != nil {
+			return 0, err
+		}
+		channelIDs[subject] = id
+		return id, nil
 	}
 
 	// Record messages until a signal requests shutdown.
@@ -125,17 +141,28 @@ func main() {
 			return
 		case msg := <-msgCh:
 			received++
-			now := time.Now().UnixNano()
+
+			channelID, err := getChannelID(msg.Subject)
+			if err != nil {
+				log.Fatalf("write channel: %v", err)
+			}
+
+			// log_time is the time at which the recorder received and recorded
+			// the message. publish_time falls back to log_time because this
+			// example does not depend on the generated protobuf message type.
+			logTime := uint64(time.Now().UnixNano())
+			publishTime := logTime
+
 			if err := writer.WriteMessage(&mcap.Message{
-				ChannelID:   channel.ID,
+				ChannelID:   channelID,
 				Sequence:    received,
-				LogTime:     uint64(now),
-				PublishTime: uint64(now),
+				LogTime:     logTime,
+				PublishTime: publishTime,
 				Data:        msg.Data,
 			}); err != nil {
 				log.Fatalf("write message: %v", err)
 			}
-			fmt.Printf("recorded seq=%d\n", received)
+			fmt.Printf("recorded seq=%d channel=%d topic=%s\n", received, channelID, msg.Subject)
 		}
 	}
 }

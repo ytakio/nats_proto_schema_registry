@@ -7,6 +7,7 @@ import asyncio
 import contextlib
 import signal
 import sys
+import time
 from pathlib import Path
 
 import nats
@@ -72,14 +73,14 @@ async def main() -> None:
         seq = 0
         try:
             while not stop_event.is_set():
-                now = asyncio.get_event_loop().time()
+                now_ns = time.time_ns()
                 seq += 1
                 msg = SensorReading(
                     sequence=seq,
                     temperature=20.0 + (seq - 1) * 0.1,
                     humidity=50.0 + (seq - 1) * 0.2,
                     pressure=1013.0 + (seq - 1) * 0.05,
-                    timestamp_ns=int(now * 1e9),
+                    timestamp_ns=now_ns,
                     device_type=Type(
                         name="sensorpb.SensorReading",
                         syntax=_SYNTAX_PROTO3,

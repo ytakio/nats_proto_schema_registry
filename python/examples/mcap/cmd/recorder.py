@@ -7,6 +7,7 @@ import asyncio
 import contextlib
 import signal
 import sys
+import time
 from pathlib import Path
 
 import nats
@@ -77,11 +78,7 @@ async def main() -> None:
                 encoding="protobuf",
                 data=fds.SerializeToString(),
             )
-            channel_id = writer.register_channel(
-                topic=args.subject,
-                message_encoding=MessageEncoding.Protobuf,
-                schema_id=schema_id,
-            )
+            channel_ids: dict[str, int] = {}
 
             # Record messages until a signal requests shutdown or no message
             # arrives for a short grace period.
@@ -110,16 +107,30 @@ async def main() -> None:
                         break
 
                     received += 1
-                    now = asyncio.get_event_loop().time()
-                    now_ns = int(now * 1e9)
+
+                    # log_time is the time at which the recorder received and
+                    # recorded the message. publish_time falls back to log_time
+                    # because this example does not depend on the generated
+                    # protobuf message type.
+                    log_time = time.time_ns()
+                    publish_time = log_time
+
+                    subject = msg.subject
+                    if subject not in channel_ids:
+                        channel_ids[subject] = writer.register_channel(
+                            topic=subject,
+                            message_encoding=MessageEncoding.Protobuf,
+                            schema_id=schema_id,
+                        )
+
                     writer.add_message(
-                        channel_id=channel_id,
-                        log_time=now_ns,
-                        publish_time=now_ns,
+                        channel_id=channel_ids[subject],
+                        log_time=log_time,
+                        publish_time=publish_time,
                         sequence=received,
                         data=msg.data,
                     )
-                    print(f"recorded seq={received}")
+                    print(f"recorded seq={received} channel={channel_ids[subject]} topic={subject}")
             finally:
                 for sig in (signal.SIGINT, signal.SIGTERM):
                     loop.remove_signal_handler(sig)
