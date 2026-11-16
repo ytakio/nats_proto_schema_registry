@@ -21,7 +21,6 @@
 #include "schemaregistry/nats/connection.hpp"
 #include "schemaregistry/nats/message.hpp"
 #include "schemaregistry/nats_registry.hpp"
-#include "sensor.pb.h"
 
 #include <mcap/writer.hpp>
 
@@ -36,6 +35,7 @@
 #include <mutex>
 #include <queue>
 #include <string>
+#include <unordered_map>
 
 #define LOG_INFO(...) std::cout << std::format(__VA_ARGS__) << std::flush
 #define LOG_ERROR(...) std::cerr << std::format(__VA_ARGS__) << std::flush
@@ -228,12 +228,30 @@ int main(int argc, char **argv) {
                                                           schema_data.size()));
   writer.addSchema(schema);
 
-  mcap::Channel channel;
-  channel.id = 0;
-  channel.schemaId = schema.id;
-  channel.topic = opts.subject;
-  channel.messageEncoding = "protobuf";
-  writer.addChannel(channel);
+  // Map each concrete NATS subject to an MCAP channel. When the recorder is
+  // subscribed to a wildcard, messages can arrive on different subjects and
+  // must be written to the channel whose topic matches the actual subject.
+  std::unordered_map<std::string, mcap::ChannelId> channel_ids;
+  mcap::ChannelId next_channel_id = 0;
+
+  auto channel_id_for = [&](std::string_view subject) -> mcap::ChannelId {
+    const std::string key{subject};
+    auto it = channel_ids.find(key);
+    if (it != channel_ids.end()) {
+      return it->second;
+    }
+
+    mcap::Channel channel;
+    channel.id = next_channel_id++;
+    channel.schemaId = schema.id;
+    channel.topic = key;
+    channel.messageEncoding = "protobuf";
+    writer.addChannel(channel);
+
+    const auto id = channel.id;
+    channel_ids.emplace(key, id);
+    return id;
+  };
 
   // Drain any messages that arrived while pull was blocked so they are
   // recorded with monotonically increasing sequence numbers.
@@ -245,30 +263,33 @@ int main(int argc, char **argv) {
     }
 
     ++received;
-    const auto now = std::chrono::system_clock::now();
-    const auto ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                        now.time_since_epoch())
-                        .count();
-
-    mcap::Message mcap_msg;
-    mcap_msg.channelId = channel.id;
-    mcap_msg.sequence = received;
-    mcap_msg.logTime = static_cast<mcap::Timestamp>(ns);
-    mcap_msg.publishTime = mcap_msg.logTime;
 
     const auto payload = msg->data();
-    if (!payload.empty()) {
-      mcap_msg.data = payload.data();
-      mcap_msg.dataSize = static_cast<std::uint64_t>(payload.size());
-    }
+    // log_time is the time at which the recorder received and recorded the
+    // message. publish_time falls back to log_time when the producer's publish
+    // time is not available, which is the default for this example because the
+    // recorder does not depend on the generated protobuf message type.
+    const mcap::Timestamp log_time = static_cast<mcap::Timestamp>(
+        std::chrono::duration_cast<std::chrono::nanoseconds>(
+            std::chrono::system_clock::now().time_since_epoch())
+            .count());
+    const mcap::Timestamp publish_time = log_time;
 
+    mcap::Message mcap_msg;
+    mcap_msg.channelId = channel_id_for(msg->subject());
+    mcap_msg.sequence = received;
+    mcap_msg.logTime = log_time;
+    mcap_msg.publishTime = publish_time;
+    mcap_msg.data = payload.data();
+    mcap_msg.dataSize = static_cast<std::uint64_t>(payload.size());
     auto status = writer.write(mcap_msg);
     if (!status.ok()) {
       LOG_ERROR("mcap write: {}\n", status.message);
       break;
     }
 
-    LOG_INFO("recorded seq={}\n", received);
+    LOG_INFO("recorded seq={} channel={} topic={}\n", received,
+             mcap_msg.channelId, msg->subject());
   }
 
   writer.close();
