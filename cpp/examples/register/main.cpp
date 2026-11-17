@@ -18,9 +18,6 @@
 // OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
 // SOFTWARE.
 
-#include "schemaregistry/nats/connection.hpp"
-#include "schemaregistry/nats_registry.hpp"
-
 #include <google/protobuf/wrappers.pb.h>
 
 #include <cstdlib>
@@ -29,44 +26,47 @@
 #include <stop_token>
 #include <string>
 
+#include "schemaregistry/nats/connection.hpp"
+#include "schemaregistry/nats_registry.hpp"
+
 #define LOG_INFO(...) std::cout << std::format(__VA_ARGS__) << std::flush
 #define LOG_ERROR(...) std::cerr << std::format(__VA_ARGS__) << std::flush
 
 int main() {
-  std::error_code conn_err;
-  auto conn = schemaregistry::nats::Connection::connect("nats://localhost:4444",
-                                                        conn_err);
-  if (conn_err) {
-    LOG_ERROR("connect: {}\n", conn_err.message());
-    return EXIT_FAILURE;
-  }
+    std::error_code conn_err;
+    auto conn = schemaregistry::nats::Connection::connect(
+        "nats://localhost:4444", conn_err);
+    if (conn_err) {
+        LOG_ERROR("connect: {}\n", conn_err.message());
+        return EXIT_FAILURE;
+    }
 
-  std::error_code js_err;
-  auto js = conn->jetstream(js_err);
-  if (js_err) {
-    LOG_ERROR("jetstream: {}\n", js_err.message());
-    return EXIT_FAILURE;
-  }
+    std::error_code js_err;
+    auto js = conn->jetstream(js_err);
+    if (js_err) {
+        LOG_ERROR("jetstream: {}\n", js_err.message());
+        return EXIT_FAILURE;
+    }
 
-  std::error_code reg_err;
-  auto reg =
-      schemaregistry::create_registry(*js, "metadata", "schemas", reg_err);
-  if (reg_err) {
-    LOG_ERROR("registry: {}\n", reg_err.message());
-    return EXIT_FAILURE;
-  }
+    std::error_code reg_err;
+    auto reg =
+        schemaregistry::create_registry(*js, "metadata", "schemas", reg_err);
+    if (reg_err) {
+        LOG_ERROR("registry: {}\n", reg_err.message());
+        return EXIT_FAILURE;
+    }
 
-  const std::string subject = "orders.created";
-  // push() introspects the descriptor from the message instance, so the
-  // actual field values do not matter.
-  google::protobuf::StringValue msg;
+    const std::string subject = "orders.created";
+    // push() introspects the descriptor from the message instance, so the
+    // actual field values do not matter.
+    google::protobuf::StringValue msg;
 
-  auto push_err = reg->push({}, subject, msg);
-  if (push_err) {
-    LOG_ERROR("push: {}\n", push_err.message());
-    return EXIT_FAILURE;
-  }
+    auto push_err = reg->push({}, subject, msg);
+    if (push_err) {
+        LOG_ERROR("push: {}\n", push_err.message());
+        return EXIT_FAILURE;
+    }
 
-  LOG_INFO("pushed schema for subject \"{}\"\n", subject);
-  return EXIT_SUCCESS;
+    LOG_INFO("pushed schema for subject \"{}\"\n", subject);
+    return EXIT_SUCCESS;
 }

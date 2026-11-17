@@ -20,10 +20,10 @@
 
 #pragma once
 
-#include "schemaregistry/nats/message.hpp"
-
 #include <functional>
 #include <memory>
+
+#include "schemaregistry/nats/message.hpp"
 
 namespace schemaregistry::nats {
 
@@ -33,35 +33,35 @@ class Connection;
 // owning Connection so the underlying natsConnection outlives the subscription.
 class Subscription {
 public:
-  // Closure data passed to the C asynchronous subscription callback. Kept alive
-  // for the lifetime of the Subscription that owns it.
-  struct Closure {
-    std::function<void(std::unique_ptr<Message>)> callback;
-  };
+    // Closure data passed to the C asynchronous subscription callback. Kept
+    // alive for the lifetime of the Subscription that owns it.
+    struct Closure {
+        std::function<void(std::unique_ptr<Msg>)> callback;
+    };
 
-  Subscription(natsSubscription *sub, Closure *closure,
-               std::shared_ptr<Connection> conn)
-      : sub_(sub), closure_(closure), conn_(std::move(conn)) {}
+    Subscription(natsSubscription* sub, Closure* closure,
+                 std::shared_ptr<Connection> conn)
+        : sub_(sub), closure_(closure), conn_(std::move(conn)) {}
 
-  ~Subscription() {
-    natsSubscription_Destroy(sub_);
-    delete closure_;
-  }
+    ~Subscription() {
+        natsSubscription_Destroy(sub_);
+        delete closure_;
+    }
 
-  Subscription(const Subscription &) = delete;
-  Subscription &operator=(const Subscription &) = delete;
-  Subscription(Subscription &&) = delete;
-  Subscription &operator=(Subscription &&) = delete;
+    Subscription(const Subscription&) = delete;
+    Subscription& operator=(const Subscription&) = delete;
+    Subscription(Subscription&&) = delete;
+    Subscription& operator=(Subscription&&) = delete;
 
-  [[nodiscard]]
-  natsSubscription *get() const noexcept {
-    return sub_;
-  }
+    [[nodiscard]]
+    natsSubscription* get() const noexcept {
+        return sub_;
+    }
 
 private:
-  natsSubscription *sub_;
-  Closure *closure_;
-  std::shared_ptr<Connection> conn_;
+    natsSubscription* sub_;
+    Closure* closure_;
+    std::shared_ptr<Connection> conn_;
 };
 
-} // namespace schemaregistry::nats
+}  // namespace schemaregistry::nats

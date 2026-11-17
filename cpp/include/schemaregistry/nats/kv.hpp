@@ -46,59 +46,59 @@ class JetStream;
 // operation for a single KeyValue entry.
 class KeyValueEntry {
 public:
-  // Operation type reported by a KeyValue entry watcher.
-  enum class Operation {
-    Unknown,
-    Put,
-    Delete,
-    Purge,
-  };
+    // Operation type reported by a KeyValue entry watcher.
+    enum class Operation {
+        Unknown,
+        Put,
+        Delete,
+        Purge,
+    };
 
-  explicit KeyValueEntry(kvEntry *entry) : entry_(entry) {}
+    explicit KeyValueEntry(kvEntry* entry) : entry_(entry) {}
 
-  ~KeyValueEntry() {
-    if (entry_ != nullptr) {
-      kvEntry_Destroy(entry_);
+    ~KeyValueEntry() {
+        if (entry_ != nullptr) {
+            kvEntry_Destroy(entry_);
+        }
     }
-  }
 
-  KeyValueEntry(const KeyValueEntry &) = delete;
-  KeyValueEntry &operator=(const KeyValueEntry &) = delete;
-  KeyValueEntry(KeyValueEntry &&) = delete;
-  KeyValueEntry &operator=(KeyValueEntry &&) = delete;
+    KeyValueEntry(const KeyValueEntry&) = delete;
+    KeyValueEntry& operator=(const KeyValueEntry&) = delete;
+    KeyValueEntry(KeyValueEntry&&) = delete;
+    KeyValueEntry& operator=(KeyValueEntry&&) = delete;
 
-  [[nodiscard]]
-  std::string_view key() const {
-    return kvEntry_Key(entry_);
-  }
-
-  [[nodiscard]]
-  std::span<const std::byte> value() const {
-    return {static_cast<const std::byte *>(kvEntry_Value(entry_)),
-            static_cast<std::size_t>(kvEntry_ValueLen(entry_))};
-  }
-
-  [[nodiscard]]
-  std::uint64_t revision() const {
-    return kvEntry_Revision(entry_);
-  }
-
-  [[nodiscard]]
-  Operation operation() const {
-    switch (kvEntry_Operation(entry_)) {
-    case kvOp_Put:
-      return Operation::Put;
-    case kvOp_Delete:
-      return Operation::Delete;
-    case kvOp_Purge:
-      return Operation::Purge;
-    default:
-      return Operation::Unknown;
+    [[nodiscard]]
+    std::string_view key() const {
+        return kvEntry_Key(entry_);
     }
-  }
+
+    [[nodiscard]]
+    std::span<const std::byte> value() const {
+        return {static_cast<const std::byte*>(kvEntry_Value(entry_)),
+                static_cast<std::size_t>(kvEntry_ValueLen(entry_))};
+    }
+
+    [[nodiscard]]
+    std::uint64_t revision() const {
+        return kvEntry_Revision(entry_);
+    }
+
+    [[nodiscard]]
+    Operation operation() const {
+        switch (kvEntry_Operation(entry_)) {
+        case kvOp_Put:
+            return Operation::Put;
+        case kvOp_Delete:
+            return Operation::Delete;
+        case kvOp_Purge:
+            return Operation::Purge;
+        default:
+            return Operation::Unknown;
+        }
+    }
 
 private:
-  kvEntry *entry_;
+    kvEntry* entry_;
 };
 
 // RAII wrapper around a kvWatcher pointer. The watcher yields the current value
@@ -106,54 +106,54 @@ private:
 // is called.
 class KeyWatcher {
 public:
-  using msec = std::chrono::milliseconds;
+    using msec = std::chrono::milliseconds;
 
-  explicit KeyWatcher(kvWatcher *watcher) : watcher_(watcher) {}
+    explicit KeyWatcher(kvWatcher* watcher) : watcher_(watcher) {}
 
-  ~KeyWatcher() {
-    if (watcher_ != nullptr) {
-      kvWatcher_Destroy(watcher_);
+    ~KeyWatcher() {
+        if (watcher_ != nullptr) {
+            kvWatcher_Destroy(watcher_);
+        }
     }
-  }
 
-  KeyWatcher(const KeyWatcher &) = delete;
-  KeyWatcher &operator=(const KeyWatcher &) = delete;
-  KeyWatcher(KeyWatcher &&) = delete;
-  KeyWatcher &operator=(KeyWatcher &&) = delete;
+    KeyWatcher(const KeyWatcher&) = delete;
+    KeyWatcher& operator=(const KeyWatcher&) = delete;
+    KeyWatcher(KeyWatcher&&) = delete;
+    KeyWatcher& operator=(KeyWatcher&&) = delete;
 
-  [[nodiscard]]
-  std::unique_ptr<KeyValueEntry> next(std::stop_token stop_token,
-                                      std::error_code &ec,
-                                      msec timeout = msec{1000}) {
-    // Use a stop callback to interrupt the blocking watcher when
-    // cancellation is requested.
-    std::stop_callback cb{stop_token, [w = watcher_] { kvWatcher_Stop(w); }};
+    [[nodiscard]]
+    std::unique_ptr<KeyValueEntry> next(std::stop_token stop_token,
+                                        std::error_code& ec,
+                                        msec timeout = msec{1000}) {
+        // Use a stop callback to interrupt the blocking watcher when
+        // cancellation is requested.
+        std::stop_callback cb{stop_token,
+                              [w = watcher_] { kvWatcher_Stop(w); }};
 
-    kvEntry *entry;
-    const natsStatus s =
-        kvWatcher_Next(&entry, watcher_, static_cast<int64_t>(timeout.count()));
+        kvEntry* entry;
+        const natsStatus s = kvWatcher_Next(
+            &entry, watcher_, static_cast<int64_t>(timeout.count()));
 
-    if (s == NATS_TIMEOUT) {
-      // Timeout with no update. Return an empty optional-like result so the
-      // caller can retry while still respecting cancellation.
-      return {};
+        if (s == NATS_TIMEOUT) {
+            // Timeout with no update. Return an empty optional-like result so
+            // the caller can retry while still respecting cancellation.
+            return {};
+        }
+        if (s != NATS_OK) {
+            ec = make_nats_error(s);
+            return nullptr;
+        }
+        if (entry == nullptr) {
+            return {};
+        }
+        ec = {};
+        return std::make_unique<KeyValueEntry>(entry);
     }
-    if (s != NATS_OK) {
-      ec = make_nats_error(s);
-      return nullptr;
-    }
-    if (entry == nullptr) {
-      return {};
-    }
-    ec = {};
-    return std::make_unique<KeyValueEntry>(entry);
-  }
 
-  void stop() { kvWatcher_Stop(watcher_); }
+    void stop() { kvWatcher_Stop(watcher_); }
 
 private:
-  kvWatcher *watcher_;
-  std::string key_;
+    kvWatcher* watcher_;
 };
 
 // RAII wrapper around a kvStore pointer. Holds a reference to the owning
@@ -161,76 +161,83 @@ private:
 // outlives the bucket.
 class KeyValue {
 public:
-  using msec = std::chrono::milliseconds;
+    using msec = std::chrono::milliseconds;
 
-  KeyValue(kvStore *store, std::shared_ptr<JetStream> js)
-      : store_(store), js_(std::move(js)) {}
+    KeyValue(kvStore* store, std::shared_ptr<JetStream> js)
+        : store_(store), js_(std::move(js)) {}
 
-  ~KeyValue() {
-    if (store_ != nullptr) {
-      kvStore_Destroy(store_);
+    ~KeyValue() {
+        if (store_ != nullptr) {
+            kvStore_Destroy(store_);
+        }
     }
-  }
 
-  KeyValue(const KeyValue &) = delete;
-  KeyValue &operator=(const KeyValue &) = delete;
-  KeyValue(KeyValue &&) = delete;
-  KeyValue &operator=(KeyValue &&) = delete;
+    KeyValue(const KeyValue&) = delete;
+    KeyValue& operator=(const KeyValue&) = delete;
+    KeyValue(KeyValue&&) = delete;
+    KeyValue& operator=(KeyValue&&) = delete;
 
-  [[nodiscard]]
-  std::error_code put(std::string_view key, std::span<const std::byte> value,
-                      std::uint64_t &rev) {
-    const std::string key_str{key};
-    const auto s = kvStore_Put(&rev, store_, key_str.c_str(), value.data(),
-                               static_cast<int>(value.size()));
-    if (s != NATS_OK) {
-      return make_nats_error(s);
+    [[nodiscard]]
+    std::error_code put(const std::string& key, std::span<const std::byte> data,
+                        std::uint64_t& rev) {
+        const auto s = kvStore_Put(&rev, store_, key.c_str(), data.data(),
+                                   static_cast<int>(data.size()));
+        if (s != NATS_OK) {
+            return make_nats_error(s);
+        }
+        return {};
     }
-    return {};
-  }
 
-  [[nodiscard]]
-  std::unique_ptr<KeyValueEntry> get(std::string_view key,
-                                     std::error_code &ec) {
-    kvEntry *kv_entry;
-    const std::string key_str{key};
-    const auto s = kvStore_Get(&kv_entry, store_, key_str.c_str());
-    if (s != NATS_OK) {
-      ec = make_nats_error(s);
-      return nullptr;
+    // Convenience overload for text payloads. Forwards to the binary overload
+    // so embedded NUL bytes are stored correctly.
+    [[nodiscard]]
+    std::error_code put(const std::string& key, std::string_view str,
+                        std::uint64_t& rev) {
+        const auto data = std::as_bytes(std::span{str});
+        return put(key, data, rev);
     }
-    ec = {};
-    return std::make_unique<KeyValueEntry>(kv_entry);
-  }
 
-  struct WatchOptions : kvWatchOptions {
-    WatchOptions() { kvWatchOptions_Init(this); }
-
-    WatchOptions(const kvWatchOptions &opts) : kvWatchOptions(opts) {}
-  };
-
-  [[nodiscard]]
-  std::unique_ptr<KeyWatcher> watch(std::string_view key, std::error_code &ec,
-                                    const WatchOptions &opts = {}) {
-    kvWatcher *w;
-    const std::string key_str{key};
-    const auto s = kvStore_Watch(&w, store_, key_str.c_str(), &opts);
-    if (s != NATS_OK) {
-      ec = make_nats_error(s);
-      return nullptr;
+    [[nodiscard]]
+    std::unique_ptr<KeyValueEntry> get(const std::string& key,
+                                       std::error_code& ec) {
+        kvEntry* kv_entry;
+        const auto s = kvStore_Get(&kv_entry, store_, key.c_str());
+        if (s != NATS_OK) {
+            ec = make_nats_error(s);
+            return nullptr;
+        }
+        ec = {};
+        return std::make_unique<KeyValueEntry>(kv_entry);
     }
-    ec = {};
-    return std::make_unique<KeyWatcher>(w);
-  }
 
-  [[nodiscard]]
-  std::string_view bucket() const {
-    return kvStore_Bucket(store_);
-  }
+    struct WatchOptions : kvWatchOptions {
+        WatchOptions() { kvWatchOptions_Init(this); }
+
+        WatchOptions(const kvWatchOptions& opts) : kvWatchOptions(opts) {}
+    };
+
+    [[nodiscard]]
+    std::unique_ptr<KeyWatcher> watch(const std::string& key,
+                                      std::error_code& ec,
+                                      const WatchOptions& opts = {}) {
+        kvWatcher* w;
+        const auto s = kvStore_Watch(&w, store_, key.c_str(), &opts);
+        if (s != NATS_OK) {
+            ec = make_nats_error(s);
+            return nullptr;
+        }
+        ec = {};
+        return std::make_unique<KeyWatcher>(w);
+    }
+
+    [[nodiscard]]
+    std::string_view bucket() const {
+        return kvStore_Bucket(store_);
+    }
 
 private:
-  kvStore *store_;
-  std::shared_ptr<JetStream> js_;
+    kvStore* store_;
+    std::shared_ptr<JetStream> js_;
 };
 
-} // namespace schemaregistry::nats
+}  // namespace schemaregistry::nats

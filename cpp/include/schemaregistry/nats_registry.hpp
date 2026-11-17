@@ -20,15 +20,15 @@
 
 #pragma once
 
+#include <memory>
+#include <string>
+#include <system_error>
+
 #include "schemaregistry/error.hpp"
 #include "schemaregistry/nats/jetstream.hpp"
 #include "schemaregistry/nats/kv.hpp"
 #include "schemaregistry/nats_kv_adapter.hpp"
 #include "schemaregistry/registry.hpp"
-
-#include <memory>
-#include <string_view>
-#include <system_error>
 
 namespace schemaregistry {
 
@@ -40,49 +40,48 @@ using NatsRegistry = Registry<NatsKeyValueAdapter, NatsKeyValueAdapter>;
 // must outlive the returned registry. On failure ec is set and nullptr is
 // returned.
 [[nodiscard]]
-inline std::unique_ptr<NatsRegistry>
-create_registry(nats::JetStream &js, std::string_view metadata_bucket,
-                std::string_view schema_bucket, std::error_code &ec) {
-
-  if (metadata_bucket.empty() || schema_bucket.empty()) {
-    ec = make_error_code(registry_errc::invalid_argument);
-    return nullptr;
-  }
-
-  auto get_or_create_kv =
-      [&](std::string_view bucket) -> std::unique_ptr<nats::KeyValue> {
-    std::error_code kv_ec;
-    auto kv = js.key_value(bucket, kv_ec);
-    if (!kv_ec) {
-      return kv;
-    }
-    if (kv_ec.value() != NATS_NOT_FOUND) {
-      ec = kv_ec;
-      return nullptr;
+inline std::unique_ptr<NatsRegistry> create_registry(
+    nats::JetStream& js, const std::string& metadata_bucket,
+    const std::string& schema_bucket, std::error_code& ec) {
+    if (metadata_bucket.empty() || schema_bucket.empty()) {
+        ec = make_error_code(registry_errc::invalid_argument);
+        return nullptr;
     }
 
-    kv = js.create_key_value(bucket, kv_ec);
-    if (kv_ec) {
-      ec = kv_ec;
-      return nullptr;
+    auto get_or_create_kv =
+        [&](const std::string& bucket) -> std::unique_ptr<nats::KeyValue> {
+        std::error_code kv_ec;
+        auto kv = js.key_value(bucket, kv_ec);
+        if (!kv_ec) {
+            return kv;
+        }
+        if (kv_ec.value() != NATS_NOT_FOUND) {
+            ec = kv_ec;
+            return nullptr;
+        }
+
+        kv = js.create_key_value(bucket, kv_ec);
+        if (kv_ec) {
+            ec = kv_ec;
+            return nullptr;
+        }
+        return kv;
+    };
+
+    auto metadata_kv = get_or_create_kv(metadata_bucket);
+    if (ec) {
+        return nullptr;
     }
-    return kv;
-  };
 
-  auto metadata_kv = get_or_create_kv(metadata_bucket);
-  if (ec) {
-    return nullptr;
-  }
+    auto schema_kv = get_or_create_kv(schema_bucket);
+    if (ec) {
+        return nullptr;
+    }
 
-  auto schema_kv = get_or_create_kv(schema_bucket);
-  if (ec) {
-    return nullptr;
-  }
-
-  ec = {};
-  return std::make_unique<NatsRegistry>(
-      std::make_unique<NatsKeyValueAdapter>(std::move(metadata_kv)),
-      std::make_unique<NatsKeyValueAdapter>(std::move(schema_kv)));
+    ec = {};
+    return std::make_unique<NatsRegistry>(
+        std::make_unique<NatsKeyValueAdapter>(std::move(metadata_kv)),
+        std::make_unique<NatsKeyValueAdapter>(std::move(schema_kv)));
 }
 
-} // namespace schemaregistry
+}  // namespace schemaregistry

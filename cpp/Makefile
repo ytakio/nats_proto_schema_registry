@@ -13,13 +13,13 @@ build:
 # ThreadSanitizer is used for race detection in C++.
 test:
 	$(CMAKE) -S . -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Release
-	$(CMAKE) --build $(BUILD_DIR) --target registry_test
-	cd $(BUILD_DIR) && ctest -R registry_test --output-on-failure --timeout 30
+	$(CMAKE) --build $(BUILD_DIR) --target schemaregistry_tests
+	cd $(BUILD_DIR) && ctest -R '_test$$' --output-on-failure --timeout 30
 
 test-race:
 	$(CMAKE) -S . -B $(BUILD_DIR) -DCMAKE_BUILD_TYPE=Release -DCMAKE_CXX_FLAGS="-fsanitize=thread -fno-omit-frame-pointer"
-	$(CMAKE) --build $(BUILD_DIR) --target registry_test
-	cd $(BUILD_DIR) && ctest -R registry_test --output-on-failure --timeout 30
+	$(CMAKE) --build $(BUILD_DIR) --target schemaregistry_tests
+	cd $(BUILD_DIR) && ctest -R '_test$$' --output-on-failure --timeout 30
 
 check: test-race
 
@@ -35,7 +35,7 @@ up:
 	$(COMPOSE) -f $(COMPOSE_FILE) up -d
 
 down:
-	$(COMPOSE) -f $(COMPOSE_FILE) down --remove-orphans
+	$(COMPOSE) -f $(COMPOSE_FILE) down --remove-orphans --volumes
 
 run-mcap-example: build
 	$(COMPOSE) -f $(COMPOSE_FILE) up -d
@@ -47,5 +47,5 @@ run-mcap-example: build
 	kill -s INT $$PRODUCER_PID; \
 	wait $$RECORDER_PID; \
 	wait $$PRODUCER_PID; \
-	$(COMPOSE) -f $(COMPOSE_FILE) down --remove-orphans
+	$(COMPOSE) -f $(COMPOSE_FILE) down --remove-orphans --volumes
 

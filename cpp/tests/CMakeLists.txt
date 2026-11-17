@@ -26,9 +26,23 @@ set_target_properties(registry_test PROPERTIES FOLDER "schemaregistry/tests")
 
 add_test(NAME registry_test COMMAND registry_test)
 
+add_executable(message_test
+    message_test.cpp
+)
+
+target_link_libraries(message_test
+    PRIVATE
+        nats_proto_schema_registry::schemaregistry
+        GTest::gtest_main
+)
+
+set_target_properties(message_test PROPERTIES FOLDER "schemaregistry/tests")
+
+add_test(NAME message_test COMMAND message_test)
+
 # Aggregate target that builds all tests.
 add_custom_target(schemaregistry_tests)
-add_dependencies(schemaregistry_tests registry_test)
+add_dependencies(schemaregistry_tests registry_test message_test)
 set_target_properties(
     schemaregistry_tests
     PROPERTIES FOLDER "schemaregistry/tests"

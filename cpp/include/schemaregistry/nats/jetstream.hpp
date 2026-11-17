@@ -31,7 +31,6 @@
 
 #include <memory>
 #include <string>
-#include <string_view>
 #include <system_error>
 #include <utility>
 
@@ -45,73 +44,71 @@ class Connection;
 // JetStream context.
 class JetStream {
 public:
-  JetStream(jsCtx *js, std::shared_ptr<Connection> conn)
-      : js_(js), conn_(std::move(conn)) {}
+    JetStream(jsCtx* js, std::shared_ptr<Connection> conn)
+        : js_(js), conn_(std::move(conn)) {}
 
-  ~JetStream() {
-    if (js_ != nullptr) {
-      jsCtx_Destroy(js_);
+    ~JetStream() {
+        if (js_ != nullptr) {
+            jsCtx_Destroy(js_);
+        }
     }
-  }
 
-  JetStream(const JetStream &) = delete;
-  JetStream &operator=(const JetStream &) = delete;
-  JetStream(JetStream &&) = delete;
-  JetStream &operator=(JetStream &&) = delete;
+    JetStream(const JetStream&) = delete;
+    JetStream& operator=(const JetStream&) = delete;
+    JetStream(JetStream&&) = delete;
+    JetStream& operator=(JetStream&&) = delete;
 
-  // Called once by Connection::jetstream() so that KeyValue objects created
-  // from this JetStream can keep it alive.
-  void set_self(std::weak_ptr<JetStream> self) { self_ = std::move(self); }
+    // Called once by Connection::jetstream() so that KeyValue objects created
+    // from this JetStream can keep it alive.
+    void set_self(std::weak_ptr<JetStream> self) { self_ = std::move(self); }
 
-  [[nodiscard]]
-  jsCtx *get() const noexcept {
-    return js_;
-  }
-
-  // Open an existing KeyValue bucket. Returns nullptr and sets ec on failure.
-  [[nodiscard]]
-  std::unique_ptr<KeyValue> key_value(std::string_view bucket,
-                                      std::error_code &ec) {
-    const std::string bkt{bucket};
-    kvStore *store;
-    const natsStatus s = js_KeyValue(&store, js_, bkt.c_str());
-    if (s != NATS_OK) {
-      ec = make_nats_error(s);
-      return nullptr;
+    [[nodiscard]]
+    jsCtx* get() const noexcept {
+        return js_;
     }
-    ec = {};
-    return std::make_unique<KeyValue>(store, self_.lock());
-  }
 
-  // Create a new KeyValue bucket. If cfg is nullptr, default settings are
-  // used. The bucket name argument always overrides cfg->Bucket. Returns
-  // nullptr and sets ec on failure.
-  [[nodiscard]]
-  std::unique_ptr<KeyValue> create_key_value(std::string_view bucket,
-                                             std::error_code &ec,
-                                             kvConfig *cfg = nullptr) {
-    const std::string bkt{bucket};
-    kvConfig default_cfg{};
-    if (cfg == nullptr) {
-      kvConfig_Init(&default_cfg);
-      cfg = &default_cfg;
+    // Open an existing KeyValue bucket. Returns nullptr and sets ec on failure.
+    [[nodiscard]]
+    std::unique_ptr<KeyValue> key_value(const std::string& bucket,
+                                        std::error_code& ec) {
+        kvStore* store;
+        const natsStatus s = js_KeyValue(&store, js_, bucket.c_str());
+        if (s != NATS_OK) {
+            ec = make_nats_error(s);
+            return nullptr;
+        }
+        ec = {};
+        return std::make_unique<KeyValue>(store, self_.lock());
     }
-    cfg->Bucket = bkt.c_str();
 
-    kvStore *store;
-    const natsStatus s = js_CreateKeyValue(&store, js_, cfg);
-    if (s != NATS_OK) {
-      ec = make_nats_error(s);
-      return nullptr;
+    // Create a new KeyValue bucket. If cfg is nullptr, default settings are
+    // used. The bucket name argument always overrides cfg->Bucket. Returns
+    // nullptr and sets ec on failure.
+    [[nodiscard]]
+    std::unique_ptr<KeyValue> create_key_value(const std::string& bucket,
+                                               std::error_code& ec,
+                                               kvConfig* cfg = nullptr) {
+        kvConfig default_cfg{};
+        if (cfg == nullptr) {
+            kvConfig_Init(&default_cfg);
+            cfg = &default_cfg;
+        }
+        cfg->Bucket = bucket.c_str();
+
+        kvStore* store;
+        const natsStatus s = js_CreateKeyValue(&store, js_, cfg);
+        if (s != NATS_OK) {
+            ec = make_nats_error(s);
+            return nullptr;
+        }
+        ec = {};
+        return std::make_unique<KeyValue>(store, self_.lock());
     }
-    ec = {};
-    return std::make_unique<KeyValue>(store, self_.lock());
-  }
 
 private:
-  jsCtx *js_;
-  std::shared_ptr<Connection> conn_;
-  std::weak_ptr<JetStream> self_;
+    jsCtx* js_;
+    std::shared_ptr<Connection> conn_;
+    std::weak_ptr<JetStream> self_;
 };
 
-} // namespace schemaregistry::nats
+}  // namespace schemaregistry::nats
